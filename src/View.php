@@ -329,6 +329,30 @@ final class View
     }
 
     /**
+     * Child pages of $parentId (default: this page) in the current language, for listings such as job ads.
+     * Sorted by the page's "order" (lower first, default 0), then title. Label, url and description are
+     * escaped; "fields" is the raw field data (escape it with $v->e() when printing).
+     *
+     * @return list<array{id: string, title: string, label: string, url: string, description: string, fields: array<string, mixed>}>
+     */
+    public function children(?string $parentId = null): array
+    {
+        $parentId ??= $this->page->id;
+        $lang = $this->page->lang;
+        $pages = array_values(array_filter($this->site->allPages(),
+            fn (Page $p) => $p->lang === $lang && $p->parent === $parentId));
+        usort($pages, fn (Page $a, Page $b) => [(int) ($a->data['order'] ?? 0), $a->title] <=> [(int) ($b->data['order'] ?? 0), $b->title]);
+        return array_map(fn (Page $p) => [
+            'id'          => $p->id,
+            'title'       => Html::escape($p->title),
+            'label'       => Html::escape($p->menuLabel),
+            'url'         => Html::escape($this->site->url($p->id, $lang)),
+            'description' => Html::escape($p->description),
+            'fields'      => $p->fields,
+        ], $pages);
+    }
+
+    /**
      * This page in every language it exists in (for the language switcher and hreflang).
      *
      * @return list<array{lang: string, url: string, absolute: string, current: bool}>

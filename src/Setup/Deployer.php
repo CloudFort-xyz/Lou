@@ -13,13 +13,25 @@ use Lou\Support\Fs;
  * Code is replaced; content and runtime data are not. site/ is seeded from the checkout only when the
  * install has none, because after that the server's site/ is the truth (editor, assistants, history).
  * var/, .env.php and the build output are never touched.
+ *
+ * A client site kept in its own repository (with Lou as a submodule) passes its site/ folder as $siteSource,
+ * so the first deploy seeds the install from the client's site instead of Lou's example site. In that mode
+ * later deploys also bring site/templates/ and site/assets/ up to date from it, except files changed on the
+ * server since the last deploy (reported, never overwritten) and site/assets/uploads/ (editor images).
+ * Content stays the server's. var/deploy-design.json remembers what the last deploy wrote.
  */
 final class Deployer
 {
     /** Code shipped on every deploy (folders are replaced whole, files overwritten). */
     public const CODE = ['src', 'stubs', 'vendor-bundled', 'lou', '.env.example.php', 'starters'];
 
-    public function __construct(private readonly string $source)
+    /** site/ folders a client repository (--site) keeps up to date on every deploy. */
+    public const DESIGN = ['templates', 'assets'];
+
+    /** Kept from the server inside the DESIGN folders (editor uploads). */
+    public const KEEP = ['assets/uploads'];
+
+    public function __construct(private readonly string $source, private readonly ?string $siteSource = null)
     {
     }
 
@@ -43,7 +55,7 @@ final class Deployer
         return $out ?: ["$home/lou"];
     }
 
-    /** @return array{target: string, code: list<string>, seeded: bool} */
+    /** @return array{target: string, code: list<string>, seeded: bool, design: array{updated: list<string>, deleted: list<string>, skipped: list<string>}} */
     public function deploy(string $target): array
     {
         $source = rtrim((string) realpath($this->source), '/');
@@ -53,6 +65,10 @@ final class Deployer
         $target = rtrim($target, '/');
         if ($target === '' || !str_starts_with($target, '/')) {
             throw new LouException('The install folder must be an absolute path');
+        }
+        $site = $this->siteSource === null ? "$source/site" : rtrim((string) realpath($this->siteSource), '/');
+        if ($this->siteSource !== null && ($site === '' || !is_file("$site/config.php"))) {
+            throw new LouException("$this->siteSource is not a Lou site folder (no config.php)");
         }
         Fs::ensureDir($target);
         if (realpath($target) === $source) {
@@ -85,11 +101,87 @@ final class Deployer
         @chmod("$target/lou", 0755);
 
         $seeded = false;
-        if (!is_dir("$target/site") && is_dir("$source/site")) {
-            Fs::copyDir("$source/site", "$target/site");
+        $design = ['updated' => [], 'deleted' => [], 'skipped' => []];
+        $manifest = "$target/var/deploy-design.json";
+        if (!is_dir("$target/site") && is_dir($site)) {
+            Fs::copyDir($site, "$target/site");
             $seeded = true;
+            if ($this->siteSource !== null) {
+                Fs::writeJson($manifest, self::designHashes($site));
+            }
+        } elseif ($this->siteSource !== null) {
+            $design = $this->syncDesign($site, "$target/site", $manifest);
         }
-        return ['target' => $target, 'code' => $copied, 'seeded' => $seeded];
+        return ['target' => $target, 'code' => $copied, 'seeded' => $seeded, 'design' => $design];
+    }
+
+    /**
+     * Brings site/templates and site/assets up to date with the repository, file by file. A file is written or
+     * deleted only when the server copy is still what the last deploy put there; a file changed on the server
+     * since (by an assistant, say) is left alone and reported. Editor uploads are never touched.
+     * @return array{updated: list<string>, deleted: list<string>, skipped: list<string>}
+     */
+    private function syncDesign(string $from, string $site, string $manifestFile): array
+    {
+        $last = is_file($manifestFile) ? Fs::readJson($manifestFile) : [];
+        $repo = self::designHashes($from);
+        $server = self::designHashes($site);
+        $next = [];
+        $out = ['updated' => [], 'deleted' => [], 'skipped' => []];
+        foreach ($repo as $rel => $hash) {
+            $here = $server[$rel] ?? null;
+            if ($here === $hash) {
+                $next[$rel] = $hash;
+            } elseif ($here === null || ($last[$rel] ?? null) === $here) {
+                $tmp = "$site/$rel.lou-new";
+                Fs::ensureDir(dirname($tmp));
+                if (!copy("$from/$rel", $tmp) || !rename($tmp, "$site/$rel")) {
+                    @unlink($tmp);
+                    throw new LouException("Cannot update site/$rel");
+                }
+                $next[$rel] = $hash;
+                $out['updated'][] = $rel;
+            } else {
+                if (isset($last[$rel])) {
+                    $next[$rel] = $last[$rel];
+                }
+                $out['skipped'][] = $rel;
+            }
+        }
+        foreach ($last as $rel => $hash) {
+            if (isset($repo[$rel]) || !isset($server[$rel])) {
+                continue;
+            }
+            if ($server[$rel] === $hash) {
+                unlink("$site/$rel");
+                $out['deleted'][] = $rel;
+            } else {
+                $out['skipped'][] = $rel;
+            }
+        }
+        Fs::writeJson($manifestFile, $next);
+        return $out;
+    }
+
+    /** @return array<string, string> site-relative path => sha1, for the DESIGN folders minus KEEP */
+    private static function designHashes(string $site): array
+    {
+        $out = [];
+        foreach (self::DESIGN as $dir) {
+            foreach (Fs::files("$site/$dir") as $rel) {
+                $rel = "$dir/$rel";
+                foreach (self::KEEP as $keep) {
+                    if (str_starts_with($rel, "$keep/")) {
+                        continue 2;
+                    }
+                }
+                if (!str_ends_with($rel, '.lou-new')) {
+                    $out[$rel] = (string) sha1_file("$site/$rel");
+                }
+            }
+        }
+        ksort($out);
+        return $out;
     }
 
     private function swap(string $new, string $dest): void

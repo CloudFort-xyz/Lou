@@ -224,7 +224,12 @@ Deploy options:
   install has none, and builds. `site/`, `var/` and `.env.php` are never
   overwritten, because the server's `site/` is the truth. cPanel runs it from
   `.cpanel.yml` (see `docs/deploy-cpanel.md`). KeyHelp can do the same from a
-  deploy hook.
+  deploy hook. A client site kept in its own repository (Lou as a submodule)
+  deploys with `--site=DIR` to seed from its own `site/`; in that mode every
+  deploy also updates `site/templates/` and `site/assets/` from the repository,
+  except files changed on the server since the last deploy (skipped with a
+  warning, never overwritten) and `assets/uploads/`. Content stays the server's. `--pull` then pulls
+  the client repository and its pinned Lou commit.
 - `php lou check` reports missing PHP pieces (version, extensions, writable
   folders) and config warnings.
 
@@ -299,6 +304,10 @@ definition up. Unknown ids are rejected.
   `subscribe` (NewsletterProvider) and `webhook` (generic JSON POST). If an
   action after `store` fails, the submission is kept and marked for retry,
   and the admin shows the failure.
+- **Routing:** an `email` action can pick its recipients from a field, e.g.
+  a topic dropdown: `'to_by' => ['field' => 'topic', 'map' => ['job' =>
+  'hr@client.hu']]`. Values not in the map fall back to `to`. Validate the
+  field with `in:…` so only known values are accepted.
 - **Spam protection** applies to every form: a honeypot field (bots get a
   fake success), a minimum fill time, a per-visitor plus per-form rate limit
   (SQLite, IPs stored only as keyed hashes), an `Origin`/`Referer` check,
@@ -357,6 +366,13 @@ expiry).
   it in place: text is contenteditable, and images open an upload/replace
   dialog. Saving writes the JSON field into the person's **draft** (see
   8.1) and rebuilds their preview.
+- **Repeatable pages:** templates listed in `config['admin']['repeatable']`
+  (e.g. `['job']` for job ads) get **Duplicate** and **Delete** in the page
+  list. Duplicate copies the page in every language as `<id>-N` with slug
+  `<slug>-N` and opens the copy in the editor; Delete refuses pages that have
+  children or are in the menu. Both happen in the person's draft, so nothing
+  goes live until it is published. Other page types can only be created or
+  removed in the repository or through an assistant.
 
 ### 8.1 Drafts, staging, publishing and history
 

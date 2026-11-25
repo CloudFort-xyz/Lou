@@ -20,6 +20,10 @@ $live = rtrim((string) ($baseUrl ?? ''), '/');
         <div class="row-actions">
           <a href="<?= $self ?>?r=edit&amp;page=<?= $e($main->id) ?>&amp;lang=<?= $e($main->lang) ?>">Edit</a>
           <?php if (!$main->isSpecial()): ?><a href="<?= $e($live . $site->path($main->id, $main->lang)) ?>" target="_blank" rel="noopener">View live</a><?php endif ?>
+          <?php if (!empty($r['repeatable'])): ?>
+            <form class="inline" method="post" action="<?= $self ?>?r=page-duplicate"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="page" value="<?= $e($r['id']) ?>"><button class="link" type="submit">Duplicate</button></form>
+            <form class="inline" method="post" action="<?= $self ?>?r=page-delete" data-confirm="Delete “<?= $e($main->title) ?>” in every language? It disappears from the site when your changes are published."><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="page" value="<?= $e($r['id']) ?>"><button class="link link-danger" type="submit">Delete</button></form>
+          <?php endif ?>
           <span class="muted">id: <code><?= $e($r['id']) ?></code></span>
         </div>
       </td>
@@ -37,4 +41,4 @@ $live = rtrim((string) ($baseUrl ?? ''), '/');
   <?php endforeach ?>
   </tbody>
 </table>
-<p class="muted">New pages, layout and menu changes are made through the assistant bridge or by a developer.</p>
+<p class="muted">Pages marked repeatable in the site config (such as job ads) can be duplicated and deleted here. Other new pages, layout and menu changes are made through the assistant bridge or by a developer.</p>

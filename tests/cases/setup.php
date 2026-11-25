@@ -97,6 +97,91 @@ test('deploy: copies code, seeds site/ once, keeps site/, var/ and .env.php on l
     check(glob("$target/.lou-deploy-*") === [] && glob("$target/*.lou-old") === [], 'no leftovers');
 });
 
+test('deploy --site: seeds from a client site once, then updates templates/assets except server-edited files', function () {
+    $repo = dirname(__DIR__, 2);
+    $client = temp_dir();
+    Fs::copyDir("$repo/site", "$client/site");
+    Fs::write("$client/site/templates/client-marker.php", 'client');
+    $target = temp_dir() . '/kner';
+    $r = (new Deployer($repo, "$client/site"))->deploy($target);
+    check($r['seeded'], 'first deploy seeds site/');
+    check(is_file("$target/site/templates/client-marker.php"), 'seeded from the client site, not the example');
+    check(is_file("$target/src/App.php"), 'code still comes from the Lou checkout');
+
+    // server-side edits: content, uploads and server-edited design files must survive
+    Fs::write("$target/site/content/pages/home/hu.json.marker", 'edited on server');
+    Fs::write("$target/site/assets/uploads/2026/photo.webp", 'uploaded');
+    Fs::write("$target/site/templates/assistant-new.php", 'made on the server');
+    Fs::write("$target/site/templates/page.php", 'edited on the server');
+    Fs::write("$client/site/templates/page.php", 'edited in the repo');
+    Fs::write("$client/site/templates/later.php", 'later');
+    Fs::write("$client/site/assets/css/site.css", 'body{}');
+    unlink("$client/site/templates/client-marker.php");
+    Fs::write("$client/site/content/pages/home/hu.json.repo", 'repo content');
+    $r = (new Deployer($repo, "$client/site"))->deploy($target);
+    $d = $r['design'];
+    check(!$r['seeded'], 'later deploys do not seed');
+    check($d['updated'] === ['assets/css/site.css', 'templates/later.php'], 'updated: ' . implode(',', $d['updated']));
+    check($d['deleted'] === ['templates/client-marker.php'], 'deleted: ' . implode(',', $d['deleted']));
+    check($d['skipped'] === ['templates/page.php'], 'skipped: ' . implode(',', $d['skipped']));
+    check(file_get_contents("$target/site/templates/page.php") === 'edited on the server', 'server edit not overwritten');
+    check(is_file("$target/site/templates/assistant-new.php"), 'server-only template kept');
+    check(!is_file("$target/site/templates/client-marker.php"), 'template removed in the repo is removed');
+    check(file_get_contents("$target/site/assets/css/site.css") === 'body{}', 'css deployed');
+    check(is_file("$target/site/assets/uploads/2026/photo.webp"), 'editor uploads kept');
+    check(is_file("$target/site/content/pages/home/hu.json.marker"), 'server content kept');
+    check(!is_file("$target/site/content/pages/home/hu.json.repo"), 'repo content not deployed');
+
+    // the conflict stays reported until resolved; committing the server's version resolves it
+    $r = (new Deployer($repo, "$client/site"))->deploy($target);
+    check($r['design']['skipped'] === ['templates/page.php'] && $r['design']['updated'] === [], 'still skipped, nothing else');
+    Fs::write("$client/site/templates/page.php", 'edited on the server');
+    $r = (new Deployer($repo, "$client/site"))->deploy($target);
+    check($r['design']['skipped'] === [], 'resolved');
+    Fs::write("$client/site/templates/page.php", 'v2');
+    $r = (new Deployer($repo, "$client/site"))->deploy($target);
+    check($r['design']['updated'] === ['templates/page.php'], 'repo updates flow again after resolving');
+
+    $plain = (new Deployer($repo))->deploy(temp_dir() . '/plain');
+    check($plain['design']['updated'] === [] && !is_file(dirname($plain['target']) . '/plain/var/deploy-design.json'), 'without --site nothing is synced');
+
+    try {
+        (new Deployer($repo, temp_dir()))->deploy(temp_dir() . '/x');
+        check(false, 'a folder without config.php should fail');
+    } catch (LouException $e) {
+        contains($e->getMessage(), 'not a Lou site folder');
+    }
+});
+
+test('git: finds the client repo, its .git folder and updates submodules from a site/ subfolder', function () {
+    $dir = temp_dir();
+    $git = function (string $cwd, string ...$args): void {
+        $cmd = 'git -C ' . escapeshellarg($cwd) . ' -c user.name=t -c user.email=t@t -c init.defaultBranch=main '
+            . '-c protocol.file.allow=always ' . implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
+        exec($cmd, $out, $code);
+        check($code === 0, "$cmd: " . implode("\n", $out));
+    };
+    mkdir("$dir/core");
+    $git("$dir/core", 'init', '-q');
+    file_put_contents("$dir/core/lou", 'x');
+    $git("$dir/core", 'add', '.');
+    $git("$dir/core", 'commit', '-qm', 'core');
+    mkdir("$dir/client/site", 0777, true);
+    $git("$dir/client", 'init', '-q');
+    file_put_contents("$dir/client/site/config.php", '<?php return [];');
+    $git("$dir/client", 'submodule', 'add', '-q', "$dir/core", 'lou');
+    $git("$dir/client", 'commit', '-qam', 'client');
+
+    $client = new Lou\Support\Git("$dir/client/site");
+    check($client->topLevel() === realpath("$dir/client"), 'top level: ' . $client->topLevel());
+    check($client->gitDir() === realpath("$dir/client") . '/.git', 'git dir: ' . $client->gitDir());
+    check(Lou\Support\Git::available("$dir/client/lou"), 'a submodule (.git file) counts as a checkout');
+    Fs::removeDir("$dir/client/lou");
+    mkdir("$dir/client/lou");
+    $client->updateSubmodules();
+    check(is_file("$dir/client/lou/lou"), 'submodule checked out again');
+});
+
 test('deploy: refuses relative targets and the checkout itself', function () {
     $repo = dirname(__DIR__, 2);
     foreach (['relative/lou', $repo] as $bad) {

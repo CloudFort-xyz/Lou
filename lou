@@ -103,18 +103,33 @@ try {
 
         case 'deploy':
             $home = getenv('HOME') ?: '';
+            $siteSource = null;
+            if (isset($opt['site'])) {
+                if (!is_string($opt['site']) || !is_dir($opt['site'])) {
+                    throw new LouException('--site must name a site folder, e.g. --site=site');
+                }
+                $siteSource = (string) realpath($opt['site']);
+            }
             if (isset($opt['pull'])) {
-                // For cron: do nothing unless the checked-out branch has new commits upstream.
-                $lock = fopen(__DIR__ . '/.git/lou-deploy.lock', 'c');
+                // For cron: do nothing unless the checked-out branch has new commits upstream. With --site the
+                // repository to pull is the client repo around the site folder (Lou is its submodule).
+                $repo = new Lou\Support\Git($siteSource ?? __DIR__);
+                $lock = fopen($repo->gitDir() . '/lou-deploy.lock', 'c');
                 if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
                     exit(0);   // another deploy is running
                 }
-                if (!(new Lou\Support\Git(__DIR__))->pullFastForward()) {
+                if (!$repo->pullFastForward()) {
                     exit(0);
                 }
-                echo gmdate('Y-m-d H:i:s') . " UTC: new commits pulled into " . __DIR__ . "\n";
+                if ($siteSource !== null) {
+                    $repo->updateSubmodules();
+                }
+                echo gmdate('Y-m-d H:i:s') . " UTC: new commits pulled into " . $repo->topLevel() . "\n";
                 // the code on disk just changed: deploy with the new version, not the one loaded here
                 $args = [PHP_BINARY, __DIR__ . '/lou', 'deploy', ...array_slice($pos, 1)];
+                if ($siteSource !== null) {
+                    $args[] = "--site=$siteSource";
+                }
                 if (isset($opt['no-build'])) {
                     $args[] = '--no-build';
                 }
@@ -134,11 +149,19 @@ try {
             foreach ($targets as $target) {
                 echo "Deploying Lou from " . __DIR__ . " to $target\n";
                 try {
-                    $r = (new Deployer(__DIR__))->deploy($target);
+                    $r = (new Deployer(__DIR__, $siteSource))->deploy($target);
                     // zip updates in the admin would be overwritten by the next deploy from this clone
                     Lou\Support\Fs::writeJson("$target/var/deployed-from.json", ['source' => __DIR__, 'at' => gmdate('c')]);
                     echo '  updated: ' . implode(', ', $r['code']) . "\n";
-                    echo $r['seeded'] ? "  site/ did not exist, seeded it from the repository\n" : "  site/ kept (the server's copy is the live content)\n";
+                    echo $r['seeded'] ? '  site/ did not exist, seeded it from ' . ($siteSource ?? 'the repository') . "\n" : "  site/ content kept (the server's copy is the live content)\n";
+                    foreach (['updated' => 'updated from the repository', 'deleted' => 'deleted (removed from the repository)'] as $k => $label) {
+                        foreach ($r['design'][$k] as $f) {
+                            echo "  site/$f: $label\n";
+                        }
+                    }
+                    foreach ($r['design']['skipped'] as $f) {
+                        echo "  warning: site/$f was changed on the server since the last deploy, so the repository's version was not applied. Commit the server's version to the repository, or delete it on the server, then deploy again\n";
+                    }
                     lou_report_check(array_values(array_filter((new Requirements($target))->run(), fn ($i) => $i['level'] !== Requirements::OK)));
                     if (!isset($opt['no-build'])) {
                         $proc = proc_open([PHP_BINARY, "$target/lou", 'build'], [], $pipes);
@@ -327,10 +350,14 @@ try {
                                               Manage admin users (add prompts for the password)
               token list|add NAME|revoke ID   Manage LLM bridge tokens (/_lou/mcp.php)
               check                           Check PHP version, extensions, folders and config for this install
-              deploy [DIR] [--no-build] [--pull]
+              deploy [DIR] [--site=DIR] [--no-build] [--pull]
                                               Copy the code from this checkout into an install, seed site/ on the
                                               first deploy only, then build. Without DIR: every folder listed in
-                                              ~/.lou-target, or ~/lou. --pull (for cron): git pull first and do
+                                              ~/.lou-target, or ~/lou. --site: seed from this site folder (a
+                                              client repo with Lou as a submodule) and update site/templates
+                                              and site/assets from it on every deploy, skipping files changed
+                                              on the server since the last deploy. --pull (for cron): git pull
+                                              first (the client repo with --site, plus its submodules) and do
                                               nothing when there is nothing new
               update [--check] [--zip=FILE] [--force] [--no-build]
                                               Update Lou from the latest GitHub release (or a release zip), then

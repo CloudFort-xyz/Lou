@@ -176,6 +176,14 @@ final class FormProcessor
     private function actionEmail(string $formId, string $lang, array $action, array $data): void
     {
         $to = (array) ($action['to'] ?? throw new LouException("Email action of '$formId' needs 'to'"));
+        // 'to_by' => ['field' => 'topic', 'map' => ['job' => 'hr@…']]: a field's value picks the recipients;
+        // values not in the map (or an empty field) fall back to 'to'.
+        if (isset($action['to_by']['field'], $action['to_by']['map'])) {
+            $value = (string) ($data[(string) $action['to_by']['field']] ?? '');
+            if ($value !== '' && isset($action['to_by']['map'][$value])) {
+                $to = (array) $action['to_by']['map'][$value];
+            }
+        }
         $replace = $data + ['form' => $formId, 'site' => $this->app->config['name']];
         $subject = (string) ($action['subject'] ?? '[{site}] New {form} submission');
         foreach ($replace as $k => $v) {

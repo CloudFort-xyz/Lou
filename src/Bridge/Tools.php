@@ -222,7 +222,7 @@ final class Tools
         $v->text('hero.title'), $v->html('body') (sanitised rich text), $v->field('features', []) (raw value for loops), $v->has('x')
         $v->image('hero.image', class: 'x', lazy: true), $v->editable('path', 'text'|'html') (marks inline-editable elements)
         $v->url('page-id'), $v->asset('path'), $v->t('key', ['name' => 'value']), $v->global('company')
-        $v->menu() (items: label, url, active, children), $v->alternates() (language switcher), $v->seoLinks(), $v->scripts()
+        $v->menu() (items: label, url, active, children), $v->children() (child pages: id, title, url, description, raw fields; sorted by "order"), $v->alternates() (language switcher), $v->seoLinks(), $v->scripts()
         $v->lang(), $v->title(), $v->description(), $v->e($string)
         Forms: <form<?= $v->formAttrs('contact') ?>><?= $v->formFields('contact') ?> … <?= $v->captcha('contact') ?></form>
 

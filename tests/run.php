@@ -88,6 +88,26 @@ test('edit previews carry editor markers and noindex', function () {
     check(!is_file("$root/var/manifest.json"), 'preview must not touch the live manifest');
 });
 
+test('children() lists child pages of the current language, sorted by order then title, escaped', function () {
+    $root = install();
+    foreach (['b' => [2, 'Bé <b>'], 'a' => [1, 'A job'], 'c' => [1, 'Ce job']] as $id => [$order, $title]) {
+        foreach (['hu', 'en'] as $lang) {
+            if ($id === 'c' && $lang === 'en') {
+                continue;   // missing translations are skipped, not fatal
+            }
+            Fs::writeJson("$root/site/content/pages/job-$id/$lang.json", ['title' => $title, 'slug' => "job-$id",
+                'parent' => 'about', 'order' => $order, 'template' => 'page', 'fields' => ['hero' => ['title' => $title], 'place' => 'Békéscsaba']]);
+        }
+    }
+    Fs::write("$root/site/templates/page.php", '<?php /** @var Lou\View $v */ $v->layout("layout") ?>'
+        . '<?php foreach ($v->children() as $c): ?><a href="<?= $c["url"] ?>"><?= $c["title"] ?>|<?= $v->e($c["fields"]["place"]) ?></a><?php endforeach ?>');
+    (new Builder(new App($root)))->build();
+    $hu = file_get_contents("$root/public/rolunk/index.html");
+    contains($hu, '<a href="/rolunk/job-a/">A job|Békéscsaba</a><a href="/rolunk/job-c/">Ce job|Békéscsaba</a><a href="/rolunk/job-b/">Bé &lt;b&gt;|Békéscsaba</a>');
+    $en = file_get_contents("$root/public/en/about-us/index.html");
+    check(!str_contains($en, 'job-c') && str_contains($en, '/en/about-us/job-a/'), 'English lists only English pages');
+});
+
 test('html sanitiser strips scripts, handlers and js: links', function () {
     $out = Html::sanitise('<p onclick="x()">Hi <script>alert(1)</script><a href="javascript:alert(1)">x</a><a href="/ok" target="_blank">ok</a><img src=x onerror=alert(1)></p>');
     check(!str_contains($out, 'script') && !str_contains($out, 'onclick') && !str_contains($out, 'onerror'), "unsafe output: $out");

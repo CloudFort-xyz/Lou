@@ -182,6 +182,19 @@ test('forms: turnstile is verified server-side', function () {
     check(count_rows($db, 'submissions') === 1, 'only the verified one is stored');
 });
 
+test('forms: to_by routes the email by a field value, falling back to to', function () {
+    $contact = (require dirname(__DIR__, 2) . '/site/config.php')['forms']['contact'];
+    $contact['fields']['topic'] = 'in:quote,job,other';
+    $contact['actions'] = [['email', 'to' => ['info@example.com'], 'subject' => 'x',
+        'to_by' => ['field' => 'topic', 'map' => ['job' => 'hr@example.com', 'quote' => ['sales@example.com', 'boss@example.com']]]]];
+    [$p, , , $mailer] = forms_setup(['contact' => $contact]);
+    foreach (['job' => ['hr@example.com'], 'quote' => ['sales@example.com', 'boss@example.com'], 'other' => ['info@example.com']] as $topic => $to) {
+        $mailer->sent = [];
+        check($p->handle(post(contact_data(['topic' => $topic])))->status === 200, "topic $topic accepted");
+        check($mailer->sent[0]->to === $to, "$topic → " . implode(',', $mailer->sent[0]->to));
+    }
+});
+
 test('forms: reCAPTCHA v3 enforces the minimum score', function () {
     $contact = (require dirname(__DIR__, 2) . '/site/config.php')['forms']['contact'];
     [$p, , $http] = forms_setup(['contact' => ['captcha' => 'recaptcha'] + $contact], ['recaptcha_secret' => 's']);
