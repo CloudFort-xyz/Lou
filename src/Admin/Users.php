@@ -28,6 +28,15 @@ final class Users
 
     public function add(string $name, string $password, string $role = 'editor'): void
     {
+        self::validate($name, $password, $role);
+        $users = $this->all();
+        $users[strtolower($name)] = ['hash' => password_hash($password, PASSWORD_DEFAULT), 'role' => $role, 'created' => gmdate('c')];
+        $this->save($users);
+    }
+
+    /** @throws LouException when the name, password or role is not acceptable */
+    public static function validate(string $name, string $password, string $role = 'editor'): void
+    {
         if (!preg_match('/^[a-z0-9._@-]{2,64}$/i', $name)) {
             throw new LouException('User names may contain letters, digits and . _ @ - (2–64 characters)');
         }
@@ -37,9 +46,6 @@ final class Users
         if (mb_strlen($password) < self::MIN_PASSWORD) {
             throw new LouException('Passwords must be at least ' . self::MIN_PASSWORD . ' characters');
         }
-        $users = $this->all();
-        $users[strtolower($name)] = ['hash' => password_hash($password, PASSWORD_DEFAULT), 'role' => $role, 'created' => gmdate('c')];
-        $this->save($users);
     }
 
     public function remove(string $name): void

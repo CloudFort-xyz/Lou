@@ -3,3 +3,4 @@
 /.env.php
 /site.old-*/
 .DS_Store
+/dist/

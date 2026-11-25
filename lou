@@ -13,7 +13,9 @@ use Lou\Integrations;
 use Lou\Admin\Users;
 use Lou\LouException;
 use Lou\Setup\Deployer;
+use Lou\Setup\Release;
 use Lou\Setup\Requirements;
+use Lou\Setup\Updater;
 use Lou\View;
 
 if (PHP_SAPI !== 'cli') {
@@ -148,6 +150,8 @@ try {
                 echo "Deploying Lou from " . __DIR__ . " to $target\n";
                 try {
                     $r = (new Deployer(__DIR__, $siteSource))->deploy($target);
+                    // zip updates in the admin would be overwritten by the next deploy from this clone
+                    Lou\Support\Fs::writeJson("$target/var/deployed-from.json", ['source' => __DIR__, 'at' => gmdate('c')]);
                     echo '  updated: ' . implode(', ', $r['code']) . "\n";
                     echo $r['seeded'] ? '  site/ did not exist, seeded it from ' . ($siteSource ?? 'the repository') . "\n" : "  site/ content kept (the server's copy is the live content)\n";
                     foreach (['updated' => 'updated from the repository', 'deleted' => 'deleted (removed from the repository)'] as $k => $label) {
@@ -269,6 +273,59 @@ try {
             }
             break;
 
+        case 'release':
+            // Build lou-<version>.zip for installing and updating without Git (the release workflow runs this).
+            $key = getenv('LOU_SIGNING_KEY') ?: null;
+            $file = (new Release(__DIR__))->build(is_string($opt['out'] ?? null) ? $opt['out'] : __DIR__ . '/dist',
+                is_string($opt['version'] ?? null) ? $opt['version'] : null, $key);
+            echo "Release written: $file" . ($key ? ' (signed)' : ' (not signed)') . "\n";
+            break;
+
+        case 'release-key':
+            if (is_file(Release::KEY_FILE) && !isset($opt['force'])) {
+                throw new LouException(Release::KEY_FILE . ' already exists. Replacing it means installs only accept releases signed with the new key (--force).');
+            }
+            $pair = Release::keyPair();
+            file_put_contents(Release::KEY_FILE, $pair['public'] . "\n");
+            echo "Public key written to " . Release::KEY_FILE . " (commit it).\n\n"
+                . "Secret key, shown once. Add it to the repository as the Actions secret LOU_SIGNING_KEY\n"
+                . "(GitHub → Settings → Secrets and variables → Actions → New repository secret), then forget it:\n\n"
+                . $pair['secret'] . "\n";
+            break;
+
+        case 'update':
+            $updater = new Updater($app);
+            if (($why = $updater->blocked()) !== null) {
+                throw new LouException($why);
+            }
+            if (is_string($opt['zip'] ?? null)) {
+                $zip = $opt['zip'];
+            } else {
+                $c = $updater->check();
+                echo "Installed: {$c['current']}, latest release: {$c['version']}\n";
+                if (isset($opt['check'])) {
+                    exit($c['newer'] ? 10 : 0);
+                }
+                if (!$c['newer'] && !isset($opt['force'])) {
+                    echo "Nothing to do.\n";
+                    break;
+                }
+                $zip = $updater->download();
+            }
+            $r = $updater->apply($zip, isset($opt['force']));
+            if (!is_string($opt['zip'] ?? null)) {
+                @unlink($zip);
+            }
+            echo "Updated Lou {$r['from']} → {$r['to']}" . ($r['signed'] ? ' (signature checked)' : ' (not signed)') . "\n";
+            if (!isset($opt['no-build'])) {
+                // build with the new code in a fresh process, not with the classes loaded here
+                $proc = proc_open([PHP_BINARY, "$root/lou", 'build', "--root=$root"], [], $pipes);
+                if ((is_resource($proc) ? proc_close($proc) : 1) !== 0) {
+                    throw new LouException('The code was updated but the build failed (see above), the previous build is still live');
+                }
+            }
+            break;
+
         case 'version':
             echo 'Lou ' . App::VERSION . "\n";
             break;
@@ -302,6 +359,13 @@ try {
                                               on the server since the last deploy. --pull (for cron): git pull
                                               first (the client repo with --site, plus its submodules) and do
                                               nothing when there is nothing new
+              update [--check] [--zip=FILE] [--force] [--no-build]
+                                              Update Lou from the latest GitHub release (or a release zip), then
+                                              build. Content, var/ and .env.php are kept. --check: only report
+              release [--version=X] [--out=DIR]
+                                              Build lou-<version>.zip for installing without Git (signed when
+                                              LOU_SIGNING_KEY is set)
+              release-key                     Create the release signing key pair (once per project)
               version                         Show the version
 
             Global: --root=DIR to run against another install.

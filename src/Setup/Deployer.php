@@ -23,7 +23,7 @@ use Lou\Support\Fs;
 final class Deployer
 {
     /** Code shipped on every deploy (folders are replaced whole, files overwritten). */
-    public const CODE = ['src', 'stubs', 'vendor-bundled', 'lou', '.env.example.php'];
+    public const CODE = ['src', 'stubs', 'vendor-bundled', 'lou', '.env.example.php', 'starters'];
 
     /** site/ folders a client repository (--site) keeps up to date on every deploy. */
     public const DESIGN = ['templates', 'assets'];
@@ -67,7 +67,7 @@ final class Deployer
             throw new LouException('The install folder must be an absolute path');
         }
         $site = $this->siteSource === null ? "$source/site" : rtrim((string) realpath($this->siteSource), '/');
-        if ($site === '' || !is_file("$site/config.php")) {
+        if ($this->siteSource !== null && ($site === '' || !is_file("$site/config.php"))) {
             throw new LouException("$this->siteSource is not a Lou site folder (no config.php)");
         }
         Fs::ensureDir($target);
@@ -103,7 +103,7 @@ final class Deployer
         $seeded = false;
         $design = ['updated' => [], 'deleted' => [], 'skipped' => []];
         $manifest = "$target/var/deploy-design.json";
-        if (!is_dir("$target/site")) {
+        if (!is_dir("$target/site") && is_dir($site)) {
             Fs::copyDir($site, "$target/site");
             $seeded = true;
             if ($this->siteSource !== null) {

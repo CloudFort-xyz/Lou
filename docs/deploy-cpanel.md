@@ -2,6 +2,8 @@
 
 This guide sets Lou up on cPanel shared hosting with **Git Version Control**, using SSH or the cPanel Terminal.
 
+> No Git or SSH? Install from the release zip instead, with the web installer: see [install.md](install.md). It works on any cPanel account, including the main domain's fixed `public_html`.
+
 ## How it fits together
 
 ```

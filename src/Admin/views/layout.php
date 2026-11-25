@@ -14,6 +14,7 @@ $menu = [
     ['redirects', 'Redirects', 'shuffle', 'admin'],
     ['builds', 'Builds', 'layers', 'admin'],
     ['backups', 'Backups', 'archive', 'admin'],
+    ['updates', 'Updates', 'download', 'admin'],
     ['settings', 'Settings', 'gear', 'admin'],
 ];
 // Small stroke icons (24×24 viewBox), drawn with currentColor so they follow the menu colours.
@@ -29,6 +30,7 @@ $icons = [
     'layers'  => '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
     'archive' => '<rect x="3" y="4" width="18" height="4"/><path d="M5 8v12h14V8"/><path d="M10 12h4"/>',
     'gear'    => '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+    'download' => '<path d="M12 4v11M7 10l5 5 5-5"/><path d="M4 19h16"/>',
     'ext'     => '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v6H4V6h6"/>',
     'menu'    => '<path d="M4 6h16M4 12h16M4 18h16"/>',
 ];
@@ -78,6 +80,11 @@ $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
 <?php if (!empty($user) && !empty($baseUrlMissing) && $route !== 'settings'): ?>
   <div class="notice notice-error"><strong>The site address is not set.</strong> The sitemap, search engine links and the bridge URL need it.
     <?php if ($role === 'admin'): ?><a href="<?= $self ?>?r=settings">Set it in Settings</a>.<?php else: ?>Ask an admin to set it under Settings.<?php endif ?></div>
+<?php endif ?>
+<?php if (!empty($user) && !empty($needsRebuild) && !in_array($route, ['rebuild', 'updates'], true)): ?>
+  <div class="notice notice-warn"><strong>Lou was updated to <?= $e($louVersion) ?>.</strong> Rebuild the site once so it uses the new version.
+    <?php if ($role === 'admin'): ?><form method="post" action="<?= $self ?>?r=rebuild" class="inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="btn" type="submit">Rebuild now</button></form>
+    <?php else: ?>Ask an admin to rebuild it under Updates.<?php endif ?></div>
 <?php endif ?>
 <?= $content ?>
 </main>
