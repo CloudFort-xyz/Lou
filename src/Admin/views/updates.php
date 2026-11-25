@@ -9,8 +9,10 @@
   <?php if ($blocked): ?>
     <p><?= $e($blocked) ?></p>
   <?php else: ?>
-    <p class="muted">Updating replaces Lou's code only. Content, images, templates, submissions, settings and passwords stay as they are, and the live site keeps running until the rebuild.
-      <?= $signed ? 'Every update zip is checked against Lou’s release signature.' : 'This install does not check release signatures yet (no release key), only that the files match the zip’s own list.' ?></p>
+    <p class="muted">Updating changes Lou itself only. Your content, images, design, form submissions, settings and passwords stay as they are, and the site keeps running.</p>
+    <details class="fold fold-small"><summary>Technical details</summary>
+      <p class="muted">The update replaces Lou's code, then the site is rebuilt with it. <?= $signed ? 'Every update zip is checked against Lou’s release signature.' : 'This install does not check release signatures yet (no release key), only that the files match the zip’s own list.' ?></p>
+    </details>
 
     <?php if ($checkError): ?><div class="alert alert-error"><?= $e($checkError) ?></div><?php endif ?>
     <?php if ($check): ?>
@@ -29,7 +31,7 @@
       <button class="btn" type="submit">Check for updates</button>
     </form>
 
-    <h3>Upload a release</h3>
+    <details class="fold"><summary><h3>Upload a release</h3> <small class="muted">for servers that can't reach GitHub</small></summary>
     <p class="muted">For servers that can't reach GitHub: download <code>lou-&lt;version&gt;.zip</code> from the releases page and upload it here (up to <?= $e($maxUpload) ?>). Unpacking the zip over the install with FTP works too, then rebuild here.</p>
     <form method="post" action="<?= $self ?>?r=update-upload" enctype="multipart/form-data" class="stack">
       <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
@@ -37,9 +39,10 @@
       <label class="check"><input type="checkbox" name="allow_older" value="1"> Allow an older version (going back after a bad update)</label>
       <p><button class="btn" type="submit">Upload and update</button></p>
     </form>
+    </details>
   <?php endif ?>
 
-  <h2 id="design">Design update from a zip</h2>
+  <details class="fold" id="design"><summary><h2>Design update from a zip</h2> <small class="muted">templates, styles and design images only</small></summary>
   <p><strong>Design only:</strong> the site's templates, styles, scripts and design images are updated from the zip. Page texts, menus, settings and uploaded photos on this server are never changed, even if the zip contains them. Nothing goes live until you have checked a preview and published it.</p>
   <form method="post" action="<?= $self ?>?r=design-upload" enctype="multipart/form-data" class="stack">
     <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
@@ -53,6 +56,7 @@
       Files under <code>templates/</code> and <code>assets/</code> follow the zip, except files changed on the server since the last deploy: those keep the server's version and are listed after the upload.
       Content, <code>menu.json</code>, <code>config.php</code> and editor uploads are never touched. Templates go through the same safety checks as assistants' templates.</p>
     <p>The changes land in your draft. With “Send it to Review” ticked and nothing else in your draft, they are submitted to staging at once and the preview is built; otherwise submit them under Review yourself.</p>
+  </details>
   </details>
 
   <?php if ($needsBuild): ?>

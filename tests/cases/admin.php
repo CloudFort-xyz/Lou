@@ -437,3 +437,30 @@ test('admin: times are rendered as <time> in UTC for admin.js to localise', func
     check(AdminApp::stamp(0) === '<time datetime="1970-01-01T00:00:00Z">1970-01-01 00:00 UTC</time>', 'Unix time');
     check(AdminApp::stamp('not a date <b>') === 'not a date &lt;b&gt;' && AdminApp::stamp(null) === '', 'bad input is escaped');
 });
+
+test('admin: long or rarely used sections are native <details> accordions', function () {
+    [$admin] = admin_setup();
+    $get = fn (string $r) => $admin->handle(admin_req('GET', $r, [], ['headers' => ['accept' => 'text/html']]))->body;
+    $a = $get('assistants');
+    check(substr_count($a, '<details class="fold"') === 4 && substr_count($a, '<details class="fold" open>') === 1, 'one accordion per client, Claude Code open');
+    contains($a, 'data-fold-all="#clients"');
+    contains($get('backups'), '<details class="fold"><summary><h2>Restore a backup</h2>');
+    contains($get('updates'), '<details class="fold" id="design">');
+    contains($get('edit'), '<details class="fold fold-panel" open><summary><h2>Page settings</h2>');
+});
+
+test('admin: backups can be deleted (admins only, only real backup files)', function () {
+    [$admin, , $app] = admin_setup();
+    $html = ['headers' => ['accept' => 'text/html']];
+    $admin->handle(admin_req('POST', 'backup', [], $html));
+    $file = basename(glob($app->varDir . '/backups/*.zip')[0]);
+    $page = $admin->handle(admin_req('GET', 'backups', [], $html))->body;
+    contains($page, 'data-confirm="Delete the backup ' . $file . ' permanently?');
+    check($admin->handle(admin_req('POST', 'backup-delete', ['file' => '../users.json']))->status === 422, 'no path tricks');
+    check($admin->handle(admin_req('POST', 'backup-delete', ['file' => 'nope.zip']))->status === 422, 'unknown file');
+    [$editor] = admin_setup('editor');
+    check($editor->handle(admin_req('POST', 'backup-delete', ['file' => $file], $html))->status === 403, 'editors cannot delete');
+    check($admin->handle(admin_req('POST', 'backup-delete', ['file' => $file], $html))->status === 303, 'deleted');
+    check(!is_file($app->varDir . "/backups/$file") && is_file($app->varDir . '/users.json'), 'only the backup is gone');
+    contains($admin->handle(admin_req('GET', 'backups', [], $html))->body, "Backup $file deleted.");
+});
