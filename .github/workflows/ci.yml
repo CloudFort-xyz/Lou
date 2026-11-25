@@ -24,4 +24,5 @@ jobs:
       - name: Build example site
         run: php lou build
       - name: Build a release zip
-        run: php lou release --out=dist
+        # smoke test only: real releases are signed by the Release workflow
+        run: php lou release --out=dist --unsigned

@@ -277,7 +277,7 @@ try {
             // Build lou-<version>.zip for installing and updating without Git (the release workflow runs this).
             $key = getenv('LOU_SIGNING_KEY') ?: null;
             $file = (new Release(__DIR__))->build(is_string($opt['out'] ?? null) ? $opt['out'] : __DIR__ . '/dist',
-                is_string($opt['version'] ?? null) ? $opt['version'] : null, $key);
+                is_string($opt['version'] ?? null) ? $opt['version'] : null, $key, isset($opt['unsigned']));
             echo "Release written: $file" . ($key ? ' (signed)' : ' (not signed)') . "\n";
             break;
 
@@ -362,7 +362,7 @@ try {
               update [--check] [--zip=FILE] [--force] [--no-build]
                                               Update Lou from the latest GitHub release (or a release zip), then
                                               build. Content, var/ and .env.php are kept. --check: only report
-              release [--version=X] [--out=DIR]
+              release [--version=X] [--out=DIR] [--unsigned]
                                               Build lou-<version>.zip for installing without Git (signed when
                                               LOU_SIGNING_KEY is set)
               release-key                     Create the release signing key pair (once per project)
