@@ -41,8 +41,10 @@ final class Release
      * Writes lou-<version>.zip (+ .sha256) into $outDir and returns the zip's path.
      * @param string|null $version   overrides App::VERSION in the packaged src/App.php (the release workflow passes the tag)
      * @param string|null $secretKey base64 Ed25519 secret key (sodium_crypto_sign_keypair format) to sign with
+     * @param bool        $unsigned  build without a signature on purpose (CI smoke tests): installs that check
+     *                               signatures will refuse the zip
      */
-    public function build(string $outDir, ?string $version = null, ?string $secretKey = null): string
+    public function build(string $outDir, ?string $version = null, ?string $secretKey = null, bool $unsigned = false): string
     {
         $src = rtrim($this->source, '/');
         if (!is_file("$src/lou") || !is_file("$src/src/App.php")) {
@@ -53,7 +55,7 @@ final class Release
             throw new LouException("'$version' is not a version like 1.2.3");
         }
         $trusted = $this->publicKey === null ? self::trustedKey() : ($this->publicKey ?: null);
-        if ($secretKey === null && $trusted !== null) {
+        if ($secretKey === null && $trusted !== null && !$unsigned) {
             throw new LouException('Installs check update signatures (' . basename(self::KEY_FILE) . ' exists), so a release must be signed: set LOU_SIGNING_KEY');
         }
         if ($secretKey !== null && $trusted !== null

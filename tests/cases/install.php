@@ -160,6 +160,8 @@ test('release: signed zips verify; a changed, extra or unsigned file is refused'
     } catch (LouException $e) {
         contains($e->getMessage(), 'LOU_SIGNING_KEY');
     }
+    $smoke = (new Release(dirname(__DIR__, 2), $keys['public']))->build(temp_dir(), '2.0.0', null, true);
+    check(is_file($smoke), 'an explicitly unsigned build (CI smoke test) is allowed');
     try {
         (new Release(dirname(__DIR__, 2), $keys['public']))->build(temp_dir(), '2.0.0', $other['secret']);
         check(false, 'signing with the wrong key must fail');
