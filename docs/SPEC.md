@@ -326,6 +326,33 @@ expiry).
 - Other screens: form submissions, subscribers, pending LLM changesets
   (diff + preview + approve/reject), build history and rollback.
 
+## 8.1 Backups
+
+There's a **single-file backup and restore** of everything that makes up the site.
+
+- **Create:** `php lou backup` or the admin's "Download backup" button
+  produces one `lou-backup-<site>-<date>.zip` containing:
+  - `site/` (content in all languages, templates, assets and uploaded
+    images, menu, redirects, config)
+  - `lou.sqlite`: a consistent snapshot taken with `VACUUM INTO`, so it's
+    safe while the site is live (submissions, subscribers, audit log)
+  - `manifest.json`: Lou version, date, file list with SHA-256 checksums,
+    languages
+- **Secrets** (`.env.php`) are **excluded by default**. They can be
+  included only with a password, in which case the zip is AES-256 encrypted
+  via `ZipArchive`.
+- **Restore:** `php lou restore <file>` or an upload in the admin. Lou
+  validates the manifest and checksums, **automatically backs up the current
+  state first**, then restores into **staging** so you get a preview link and
+  a redirect report before anything goes live. Approving it swaps it in and
+  rebuilds, exactly like an LLM changeset. The database restore can be
+  skipped (content only).
+- **Scheduled:** an optional cron (`php lou backup --keep=14`) keeps the
+  last N backups in `var/backups/` (outside the web root). Backups are also
+  downloadable from the admin.
+- Builds (`public/`) are not backed up, because they're always regenerated
+  from the backup.
+
 ## 9. LLM bridge
 
 Goal: **any** assistant can restructure the site, and nothing goes live
@@ -398,7 +425,8 @@ without approval.
 2. **Forms and integrations:** contact form, SQLite, SMTP, newsletter
    adapters, captcha, and the first real client site.
 3. **Admin and inline editor:** auth, field editing, image pipeline,
-   submissions view, publish and rollback.
+   submissions view, publish and rollback, backups (the CLI backup and
+   restore can ship earlier, with the skeleton).
 4. **LLM bridge:** MCP endpoint, staging, previews, approve/reject, optional
    Git commits, REST fallback.
 
