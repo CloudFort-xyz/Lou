@@ -20,7 +20,8 @@ foreach ($open ? $meta['submissions'] : [] as $sub) {
 }
 
 /** One change list, grouped. $where: 'draft' (Undo = revert in my draft) or 'staging' (Undo = take it off staging). */
-$changes = static function (array $list, string $where) use ($e, $self, $csrf, $by): void { ?>
+$views ??= [];
+$changes = static function (array $list, string $where) use ($e, $self, $csrf, $by, $views): void { ?>
   <?php foreach (ChangeList::grouped($list) as $group => $groupItems): ?>
     <h4 class="change-group"><?= $e(ChangeList::GROUPS[$group]) ?></h4>
     <ul class="changes">
@@ -31,6 +32,9 @@ $changes = static function (array $list, string $where) use ($e, $self, $csrf, $
           <?php if ($it['kind'] !== 'changed'): ?><span class="badge<?= $it['kind'] === 'deleted' ? ' badge-warn' : '' ?>"><?= $it['kind'] === 'added' ? 'new' : 'removed' ?></span><?php endif ?>
           <?php if ($where === 'staging' && isset($by[$it['path']])): ?><small class="muted">by <?= $e(implode(', ', array_keys($by[$it['path']]))) ?></small><?php endif ?>
           <span class="change-actions">
+            <?php if ($where === 'staging' && isset($views[$it['path']])): ?>
+              <a href="<?= $e($views[$it['path']]) ?>" target="_blank" rel="noopener" title="Open this page in the preview">View</a>
+            <?php endif ?>
             <?php if ($it['page'] && $it['kind'] !== 'deleted'): ?>
               <a href="<?= $self ?>?r=edit&amp;page=<?= $e(rawurlencode($it['page']['id'])) ?>&amp;lang=<?= $e($it['page']['lang']) ?>" title="Open this page in the editor. Your edit goes into your draft, on top of this change.">Edit</a>
             <?php endif ?>
@@ -158,6 +162,10 @@ $diffList = static function (array $list, array $diffs) use ($e): void {
           <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
           <button class="btn btn-link" type="submit">Rebuild</button>
         </form>
+        <?php if ($views): ?>
+          <p class="preview-pages">Changed pages:
+            <?php $i = 0; foreach ($items as $it): if (!isset($views[$it['path']])) continue; ?><?= $i++ ? ' · ' : '' ?><a href="<?= $e($views[$it['path']]) ?>" target="_blank" rel="noopener"><?= $e($it['label']) ?></a><?php endforeach ?></p>
+        <?php endif ?>
       <?php else: ?>
         <form method="post" action="<?= $self ?>?r=review-preview" class="inline">
           <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
