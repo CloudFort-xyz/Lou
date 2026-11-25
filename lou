@@ -12,6 +12,8 @@ use Lou\Forms\FormProcessor;
 use Lou\Integrations;
 use Lou\Admin\Users;
 use Lou\LouException;
+use Lou\Setup\Deployer;
+use Lou\Setup\Requirements;
 use Lou\View;
 
 if (PHP_SAPI !== 'cli') {
@@ -71,6 +73,16 @@ function lou_report_build(array $r): void
     }
 }
 
+/** Prints check results; returns true when nothing failed. */
+function lou_report_check(array $results): bool
+{
+    $mark = [Requirements::OK => 'ok  ', Requirements::WARN => 'warn', Requirements::FAIL => 'FAIL'];
+    foreach ($results as $i) {
+        echo '  ' . $mark[$i['level']] . '  ' . str_pad($i['label'], 20) . ($i['detail'] !== '' ? ' ' . $i['detail'] : '') . "\n";
+    }
+    return Requirements::passed($results);
+}
+
 [$pos, $opt] = lou_args(array_slice($argv, 1));
 $cmd = $pos[0] ?? 'help';
 $root = isset($opt['root']) && is_string($opt['root']) ? $opt['root'] : __DIR__;
@@ -79,6 +91,36 @@ try {
     $app = new App($root);
 
     switch ($cmd) {
+        case 'check':
+            echo "Checking the command-line PHP and the install at $root\n";
+            $ok = lou_report_check((new Requirements($root))->run());
+            echo $ok
+                ? "\nAll required pieces are there. The website's PHP (MultiPHP Manager) must be the same version.\n"
+                : "\nSome required pieces are missing (FAIL above).\n";
+            exit($ok ? 0 : 1);
+
+        case 'deploy':
+            $target = $pos[1] ?? ((getenv('HOME') ?: throw new LouException('Usage: php lou deploy DIR')) . '/lou');
+            echo "Deploying Lou from " . __DIR__ . " to $target\n";
+            $php = (new Requirements($target))->php();
+            if (!Requirements::passed($php)) {
+                lou_report_check(array_values(array_filter($php, fn ($i) => $i['level'] === Requirements::FAIL)));
+                throw new LouException('This PHP is missing required pieces, nothing was deployed');
+            }
+            $r = (new Deployer(__DIR__))->deploy($target);
+            echo '  updated: ' . implode(', ', $r['code']) . "\n";
+            echo $r['seeded'] ? "  site/ did not exist, seeded it from the repository\n" : "  site/ kept (the server's copy is the live content)\n";
+            lou_report_check(array_values(array_filter((new Requirements($target))->run(), fn ($i) => $i['level'] !== Requirements::OK)));
+            if (isset($opt['no-build'])) {
+                break;
+            }
+            $proc = proc_open([PHP_BINARY, "$target/lou", 'build'], [], $pipes);
+            $code = is_resource($proc) ? proc_close($proc) : 1;
+            if ($code !== 0) {
+                throw new LouException('The code was deployed but the build failed (see above). The previous build is still live.');
+            }
+            break;
+
         case 'build':
             $mode = isset($opt['preview']) ? View::MODE_PREVIEW : View::MODE_LIVE;
             lou_report_build((new Builder($app))->build($mode, is_string($opt['out'] ?? null) ? $opt['out'] : null));
@@ -193,6 +235,9 @@ try {
               user list|add NAME [--role=admin]|remove NAME
                                               Manage admin users (add prompts for the password)
               token list|add NAME|revoke ID   Manage LLM bridge tokens (/_lou/mcp.php)
+              check                           Check PHP version, extensions, folders and config for this install
+              deploy [DIR] [--no-build]       Copy the code from this checkout into an install (default ~/lou),
+                                              seed site/ on the first deploy only, then build. For .cpanel.yml
               version                         Show the version
 
             Global: --root=DIR to run against another install.

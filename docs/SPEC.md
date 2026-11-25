@@ -202,8 +202,15 @@ admin, not at build time, so builds stay fast.
 Deploy options:
 - **FTP/SSH upload** of the repo, then build on the server via the admin or
   SSH.
-- **Git (optional):** pull on the server (KeyHelp supports deploy hooks or a
-  cron `git pull`), then `php lou build`.
+- **Git (optional):** the server's Git clone is kept separate from the live
+  install. `php lou deploy DIR` copies the code (`src/`, `stubs/`,
+  `vendor-bundled/`, `lou`) into the install, seeds `site/` only when the
+  install has none, and builds. `site/`, `var/` and `.env.php` are never
+  overwritten, because the server's `site/` is the truth. cPanel runs it from
+  `.cpanel.yml` (see `docs/deploy-cpanel.md`). KeyHelp can do the same from a
+  deploy hook.
+- `php lou check` reports missing PHP pieces (version, extensions, writable
+  folders) and config warnings.
 
 ### 6.1 Renames and redirects
 

@@ -21,6 +21,8 @@ See [docs/SPEC.md](docs/SPEC.md) for the full design.
 php lou build           # build site/ into public/ (atomic swap)
 php lou user add NAME --role=admin   # create an admin user, then open /_lou/admin.php
 php lou serve           # build a preview and serve it on http://localhost:8000
+php lou check           # check PHP version, extensions, folders and config
+php lou deploy ~/lou    # copy the code from this checkout into an install and build (cPanel)
 php lou backup          # single-file backup into var/backups/
 php lou restore FILE    # restore a backup (the current state is backed up first)
 php lou submissions     # export form submissions as CSV
@@ -30,6 +32,8 @@ php tests/run.php       # run the tests
 ```
 
 On the server, point the domain's document root at `public/`. Nothing else in the repo should be web-accessible.
+
+`php lou check` lists missing PHP pieces (version, extensions, writable folders, config). For cPanel with Git Version Control, `.cpanel.yml` runs `php lou deploy ~/lou`, which copies the code into the live install, seeds `site/` on the first deploy only, and builds. See [docs/deploy-cpanel.md](docs/deploy-cpanel.md).
 
 Secrets (SMTP, API keys, captcha secrets) go in `.env.php` next to `site/`. See `.env.example.php`.
 
