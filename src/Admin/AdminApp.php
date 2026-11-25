@@ -52,6 +52,8 @@ final class AdminApp
         'POST save'           => 'editor',
         'POST image'          => 'editor',
         'POST meta'           => 'editor',
+        'POST page-duplicate' => 'editor',
+        'POST page-delete'    => 'editor',
         'POST publish'        => 'editor',
         'POST share'          => 'editor',
         'GET submissions'     => 'editor',
@@ -248,6 +250,11 @@ final class AdminApp
             $t = $site->translations($id);
             $rows[] = ['id' => $id, 'translations' => $t, 'missing' => array_values(array_diff($site->languages(), array_keys($t)))];
         }
+        $store = new ContentStore($this->draft()->app());
+        foreach ($rows as &$row) {
+            $row['repeatable'] = $store->isRepeatable($row['id']);
+        }
+        unset($row);
         return $this->page('Pages', 'pages', ['rows' => $rows, 'site' => $site, 'warnings' => $site->warnings()]);
     }
 
@@ -323,6 +330,29 @@ final class AdminApp
         $this->db->audit('editor', 'meta', "$id/$lang " . implode(',', array_keys($meta)), $this->user());
         $site = Site::load($this->draft()->app());
         return $this->afterChange(['path' => $site->path($id, $lang)]);
+    }
+
+    /** Copy a repeatable page (e.g. a job ad) in the draft and open the copy in the editor. */
+    private function rPostPageDuplicate(): Response
+    {
+        $id = $this->req->input('page');
+        $new = '';
+        $this->inDraft(function (ContentStore $c) use ($id, &$new): void {
+            $new = $c->duplicatePage($id);
+        });
+        $this->db->audit('editor', 'duplicate', "$id → $new", $this->user());
+        (new Previews($this->app))->rebuild('draft:' . $this->owner());
+        return Response::redirect(self::SELF . '?r=edit&page=' . rawurlencode($new) . '&lang=' . rawurlencode((string) $this->app->config['default_language']));
+    }
+
+    /** Delete a repeatable page in the draft; it goes live through review and publish like any edit. */
+    private function rPostPageDelete(): Response
+    {
+        $id = $this->req->input('page');
+        $this->inDraft(fn (ContentStore $c) => $c->deletePage($id));
+        $this->db->audit('editor', 'delete', $id, $this->user());
+        (new Previews($this->app))->rebuild('draft:' . $this->owner());
+        return Response::redirect(self::SELF . '?r=pages');
     }
 
     private function afterChange(array $extra = []): Response

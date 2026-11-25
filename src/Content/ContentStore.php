@@ -11,7 +11,8 @@ use Lou\Support\Html;
 
 /**
  * The only way the admin editor writes content. It can change values inside a page's `fields`
- * and its title/description/menu label (plus the slug for admins). Never templates or structure.
+ * and its title/description/menu label (plus the slug for admins). Never templates or structure,
+ * except duplicating or deleting pages whose template the site lists in admin.repeatable (e.g. job ads).
  */
 final class ContentStore
 {
@@ -104,6 +105,80 @@ final class ContentStore
             }
             return $data;
         });
+    }
+
+    /** Templates whose pages editors may duplicate and delete (site config admin.repeatable). */
+    public function isRepeatable(string $id): bool
+    {
+        $templates = (array) ($this->app->config['admin']['repeatable'] ?? []);
+        if (in_array($id, [Page::HOME, Page::NOT_FOUND], true) || $templates === []) {
+            return false;
+        }
+        foreach ($this->app->config['languages'] as $lang) {
+            $file = $this->app->siteDir . "/content/pages/$id/$lang.json";
+            if (is_file($file)) {
+                return in_array((string) (Fs::readJson($file)['template'] ?? 'page'), $templates, true);
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Copies a repeatable page (every language) to a new id with "-2", "-3"… appended to id, slugs and labels.
+     * The copy sits next to the original (same parent and template) and is edited like any page.
+     */
+    public function duplicatePage(string $id): string
+    {
+        $this->file($id, $this->app->config['default_language']);
+        if (!$this->isRepeatable($id)) {
+            throw new LouException("Page '$id' can't be duplicated in the editor");
+        }
+        $pages = $this->app->siteDir . '/content/pages';
+        $base = preg_replace('/-\d+$/', '', $id) ?? $id;
+        for ($n = 2; is_dir("$pages/$base-$n"); $n++) {
+        }
+        $new = "$base-$n";
+        foreach ($this->app->config['languages'] as $lang) {
+            $data = $this->read($id, $lang);
+            $data['slug'] = (preg_replace('/-\d+$/', '', (string) ($data['slug'] ?? $base)) ?? $base) . "-$n";
+            $data['title'] = trim((string) ($data['title'] ?? '')) . " ($n)";
+            if (isset($data['menu_label'])) {
+                $data['menu_label'] = trim((string) $data['menu_label']) . " ($n)";
+            }
+            $data['order'] = (int) ($data['order'] ?? 0) + 1;
+            Fs::writeJson("$pages/$new/$lang.json", $data);
+        }
+        try {
+            Site::load($this->app);
+        } catch (LouException $e) {
+            Fs::removeDir("$pages/$new");
+            throw $e;
+        }
+        return $new;
+    }
+
+    /** Deletes a repeatable page in every language. Pages in the menu or with child pages can't be deleted here. */
+    public function deletePage(string $id): void
+    {
+        $this->file($id, $this->app->config['default_language']);
+        if (!$this->isRepeatable($id)) {
+            throw new LouException("Page '$id' can't be deleted in the editor");
+        }
+        $site = Site::load($this->app);
+        foreach ($site->allPages() as $p) {
+            if ($p->parent === $id) {
+                throw new LouException("Page '$id' has child pages, delete those first");
+            }
+        }
+        $inMenu = false;
+        $menu = $site->menu();
+        array_walk_recursive($menu, function ($v, $k) use ($id, &$inMenu): void {
+            $inMenu = $inMenu || ($k === 'page' && $v === $id);
+        });
+        if ($inMenu) {
+            throw new LouException("Page '$id' is in the menu, so it can't be deleted here");
+        }
+        Fs::removeDir($this->app->siteDir . "/content/pages/$id");
     }
 
     private function update(string $id, string $lang, callable $fn): void

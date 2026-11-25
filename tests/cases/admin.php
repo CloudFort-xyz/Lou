@@ -372,3 +372,39 @@ test('admin: the test email goes through the configured mailer and failures are 
     contains($r->body, 'SMTP down');
     check($admin->handle(admin_req('POST', 'mail-test', ['to' => 'not-an-address']))->status === 422, 'bad address');
 });
+
+test('admin: repeatable pages (admin.repeatable) can be duplicated and deleted through the draft, others cannot', function () {
+    [$admin, , $app] = admin_setup('editor');
+    $site = $app->siteDir;
+    file_put_contents("$site/config.php", str_replace('return [', "return [\n    'admin' => ['repeatable' => ['job']],", (string) file_get_contents("$site/config.php")));
+    copy("$site/templates/page.php", "$site/templates/job.php");
+    foreach (['hu' => 'allas', 'en' => 'job'] as $lang => $slug) {
+        Fs::writeJson("$site/content/pages/job-a/$lang.json", ['slug' => $slug, 'parent' => 'about', 'title' => "Állás $lang", 'menu_label' => 'Gépkezelő',
+            'template' => 'job', 'fields' => ['hero' => ['title' => 'Gépkezelő']]]);
+    }
+    [$admin, , $app] = [new \Lou\Admin\AdminApp(new App($app->root), new \Lou\Db\Database($app->databaseFile()), new ArraySession(['user' => 'kliens', 'role' => 'editor', 'started' => time(), 'seen' => time(), 'csrf' => 'tok'])), null, new App($app->root)];
+
+    $pages = $admin->handle(admin_req('GET', 'pages', [], ['headers' => ['accept' => 'text/html']]))->body;
+    check(substr_count($pages, 'r=page-duplicate') === 1 && substr_count($pages, 'r=page-delete') === 1, 'buttons only on the repeatable page');
+
+    $r = $admin->handle(admin_req('POST', 'page-duplicate', ['page' => 'job-a'], ['headers' => ['accept' => 'text/html']]));
+    check($r->status === 303 && str_contains($r->headers['Location'] ?? '', 'page=job-a-2'), 'redirects to the copy: ' . json_encode($r->headers));
+    $copy = Fs::readJson(draft_site($app, 'kliens') . '/content/pages/job-a-2/hu.json');
+    check($copy['slug'] === 'allas-2' && $copy['title'] === 'Állás hu (2)' && $copy['parent'] === 'about' && $copy['template'] === 'job', json_encode($copy, JSON_UNESCAPED_UNICODE));
+    check(!is_dir("$site/content/pages/job-a-2"), 'site/ untouched until publish');
+
+    foreach (['about', 'home', 'nope'] as $bad) {
+        $r = $admin->handle(admin_req('POST', 'page-delete', ['page' => $bad]));
+        check($r->status === 422, "$bad must not be deletable: {$r->body}");
+    }
+    $r = $admin->handle(admin_req('POST', 'page-delete', ['page' => 'job-a'], ['headers' => ['accept' => 'text/html']]));
+    check($r->status === 303 && !is_dir(draft_site($app, 'kliens') . '/content/pages/job-a'), 'deleted in the draft');
+
+    // goes live through the normal review + publish (an admin publishes)
+    $admin->handle(admin_req('POST', 'submit', ['summary' => 'jobs']));
+    [$boss] = [new \Lou\Admin\AdminApp($app, new \Lou\Db\Database($app->databaseFile()), new ArraySession(['user' => 'bence', 'role' => 'admin', 'started' => time(), 'seen' => time(), 'csrf' => 'tok']))];
+    $rev = (string) \Lou\Content\Workspace::staging($app)->meta()['rev'];
+    $boss->handle(admin_req('POST', 'publish', ['rev' => $rev], ['headers' => ['accept' => 'text/html']]));
+    check(is_dir("$site/content/pages/job-a-2") && !is_dir("$site/content/pages/job-a"), 'published: copy added, original deleted');
+    check(is_file($app->outputDir() . '/rolunk/allas-2/index.html'), 'copy is live');
+});

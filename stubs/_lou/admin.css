@@ -73,6 +73,7 @@ input.code{font-family:ui-monospace,Menlo,Consolas,monospace}
 .row-title{font-weight:600;font-size:1.02em;text-decoration:none}
 .row-actions{display:flex;flex-wrap:wrap;gap:.2rem .8rem;font-size:13px;margin-top:.15rem;visibility:hidden}
 .row-actions a{text-decoration:none}
+.row-actions button.link{background:none;border:0;padding:0;font:inherit;color:var(--accent);cursor:pointer}.row-actions button.link:hover{text-decoration:underline}.row-actions .link-danger{color:var(--err)}
 tr:hover .row-actions,tr:focus-within .row-actions{visibility:visible}
 @media(hover:none){.row-actions{visibility:visible}}
 .filters{display:flex;gap:.3rem;flex-wrap:wrap;align-items:center;font-size:13px}

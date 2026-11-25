@@ -350,6 +350,13 @@ expiry).
   it in place: text is contenteditable, and images open an upload/replace
   dialog. Saving writes the JSON field into the person's **draft** (see
   8.1) and rebuilds their preview.
+- **Repeatable pages:** templates listed in `config['admin']['repeatable']`
+  (e.g. `['job']` for job ads) get **Duplicate** and **Delete** in the page
+  list. Duplicate copies the page in every language as `<id>-N` with slug
+  `<slug>-N` and opens the copy in the editor; Delete refuses pages that have
+  children or are in the menu. Both happen in the person's draft, so nothing
+  goes live until it is published. Other page types can only be created or
+  removed in the repository or through an assistant.
 
 ### 8.1 Drafts, staging, publishing and history
 
