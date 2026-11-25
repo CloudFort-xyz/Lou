@@ -59,7 +59,9 @@ final class DesignImport
                 $out['written'][] = $rel;
                 $pending[$rel] = (string) sha1_file("$from/$rel");
             }
-            foreach ($plan['delete'] as $rel) {
+            // Without a record of an earlier deploy, a file that is only on the server was put there on the
+            // server (an assistant, FTP), not by an earlier zip: keep it rather than delete it.
+            foreach ($first ? [] : $plan['delete'] as $rel) {
                 if (is_file("$dir/$rel")) {
                     unlink("$dir/$rel");
                 }

@@ -9,10 +9,11 @@ asort($targets);
 ?>
 <h1>Redirects</h1>
 <p class="muted">Created automatically when pages are renamed, moved or deleted. Removed pages point to the home page until you choose a better target.</p>
+<?php if (!$entries): ?><p class="muted">No redirects yet.</p><?php else: ?>
 <table class="table list">
-  <thead><tr><th>From</th><th>To</th><th></th></tr></thead>
+  <thead><tr><th>From</th><th>To</th><th>Change</th></tr></thead>
   <tbody>
-  <?php foreach ($entries as $r): ?>
+  <?php foreach ($entries as $r): $current = is_array($r['to'] ?? null) ? $r['to']['page'] . '|' . $r['to']['lang'] : ''; ?>
     <tr>
       <td><code><?= $e($r['from']) ?></code><?php if (($r['auto'] ?? '') === 'gone'): ?> <span class="badge badge-warn">page removed</span><?php endif ?></td>
       <td><?php
@@ -24,16 +25,17 @@ asort($targets);
         <form method="post" action="<?= $self ?>?r=redirect" class="inline">
           <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
           <input type="hidden" name="from" value="<?= $e($r['from']) ?>">
-          <select name="target"><?php foreach ($targets as $k => $label): ?><option value="<?= $e($k) ?>"><?= $e($label) ?></option><?php endforeach ?></select>
+          <select name="target" aria-label="New target for <?= $e($r['from']) ?>"><?php foreach ($targets as $k => $label): ?><option value="<?= $e($k) ?>"<?= $k === $current ? ' selected' : '' ?>><?= $e($label) ?></option><?php endforeach ?></select>
           <button class="btn" name="action" value="page" type="submit">Point here</button>
           <button class="btn" name="action" value="410" type="submit">410 Gone</button>
-          <button class="btn btn-link" name="action" value="delete" type="submit">Delete</button>
+          <button class="btn btn-link link-danger" name="action" value="delete" type="submit" data-confirm="Delete the redirect from <?= $e($r['from']) ?>? Visitors to that address will get the not found page.">Delete</button>
         </form>
       </td>
     </tr>
   <?php endforeach ?>
   </tbody>
 </table>
+<?php endif ?>
 <h2>Add a redirect</h2>
 <form method="post" action="<?= $self ?>?r=redirect" class="stack">
   <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">

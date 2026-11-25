@@ -13,6 +13,7 @@ use Lou\Backup\Backup;
 use Lou\Bridge\Tokens;
 use Lou\Build\Builder;
 use Lou\Build\Output;
+use Lou\Content\ChangeList;
 use Lou\Content\ContentStore;
 use Lou\Content\History;
 use Lou\Content\Page;
@@ -73,6 +74,7 @@ final class AdminApp
         'GET backups'         => 'admin',
         'POST backup'         => 'admin',
         'GET download'        => 'admin',
+        'POST backup-delete'  => 'admin',
         'POST restore'        => 'admin',
         'GET redirects'       => 'admin',
         'POST redirect'       => 'admin',
@@ -82,6 +84,7 @@ final class AdminApp
         'GET review'          => 'editor',
         'POST review-preview' => 'editor',
         'POST reject'         => 'editor',
+        'POST staging-revert' => 'editor',
         'GET history'         => 'editor',
         'GET history-entry'   => 'editor',
         'POST history-restore' => 'editor',
@@ -405,7 +408,7 @@ final class AdminApp
         $this->inDraft(fn (ContentStore $c) => $c->deletePage($id));
         $this->db->audit('editor', 'delete', $id, $this->user());
         (new Previews($this->app))->rebuild('draft:' . $this->owner());
-        return Response::redirect(self::SELF . '?r=pages');
+        return $this->done('pages', 'The page was deleted in your draft. It disappears from the site when your changes are published.');
     }
 
     private function afterChange(array $extra = [], ?string $page = null): Response
@@ -470,12 +473,26 @@ final class AdminApp
         if ($conflicts && $this->req->input('force') !== '1') {
             return $this->page('Conflict', 'conflict', ['conflicts' => $conflicts, 'summary' => $this->req->input('summary')], 409);
         }
-        $files = $d->apply($this->req->input('force') === '1');
-        Workspace::staging($this->app)->addSubmission($this->owner(), $this->req->input('summary'), $files);
+        $files = $this->submitDraft($d, $this->req->input('summary'), $this->req->input('force') === '1', $ready);
+        return $this->done('review', 'Submitted ' . self::plural(count($files), 'change') . ' to staging.'
+            . ($ready ? ' The preview is ready.' : ''));
+    }
+
+    /**
+     * Draft → staging, then build the staging preview straight away so the reviewer finds it ready, and refresh
+     * the other previews (drafts show staging). $ready: whether the preview could be built.
+     * @return list<string> the submitted files
+     */
+    private function submitDraft(Workspace $d, string $summary, bool $force, ?bool &$ready = null): array
+    {
+        $files = $d->apply($force);
+        Workspace::staging($this->app)->addSubmission($this->owner(), $summary, $files);
         $previews = new Previews($this->app);
-        $previews->rebuild();
+        $p = $previews->staging($this->app->siteUrl($this->req), $this->user());
+        $previews->rebuild(null, $p ? [$p['token']] : []);
+        $ready = $p !== null;
         $this->db->audit('editor', 'submit', implode(', ', $files), $this->user());
-        return Response::redirect(self::SELF . '?r=review');
+        return $files;
     }
 
     /** Throw away (some of) my draft: the given files, or all of it. */
@@ -485,7 +502,7 @@ final class AdminApp
         $files ? $this->draft()->revert($files) : $this->draft()->discard();
         (new Previews($this->app))->rebuild('draft:' . $this->owner());
         $this->db->audit('editor', 'revert', $files ? implode(', ', $files) : 'all', $this->user());
-        return Response::redirect(self::SELF . '?r=review');
+        return $this->done('review', $files ? 'Undid ' . self::plural(count($files), 'change') . ' in your draft.' : 'Your draft was discarded.');
     }
 
     private function rGetReview(): Response
@@ -499,10 +516,11 @@ final class AdminApp
                 $drafts[] = ['owner' => $d->owner, 'files' => count($d->changedFiles()), 'updated' => $d->meta()['updated']];
             }
         }
-        $vars = ['open' => $s->exists(), 'mine' => $mine->hasChanges() ? ['files' => $mine->changedFiles(), 'conflicts' => $mine->conflicts()] : null,
-            'drafts' => $drafts];
+        $vars = ['open' => $s->exists(), 'drafts' => $drafts, 'live' => is_file($this->app->varDir . '/live.json') ? Fs::readJson($this->app->varDir . '/live.json') : null,
+            'mine' => $mine->hasChanges() ? ['items' => ChangeList::of($mine, $md = $mine->diffs()), 'diffs' => $md, 'conflicts' => $mine->conflicts()] : null];
         if ($s->exists()) {
-            $vars += ['meta' => $s->meta(), 'files' => $s->changes(), 'diffs' => $s->diffs(), 'problems' => $s->validate(),
+            $diffs = $s->diffs();
+            $vars += ['meta' => $s->meta(), 'diffs' => $diffs, 'items' => ChangeList::of($s, $diffs), 'problems' => $s->validate(),
                 'conflicts' => $s->conflicts(), 'preview' => $s->lastPreview()];
         }
         return $this->page('Review', 'review', $vars);
@@ -517,7 +535,7 @@ final class AdminApp
         }
         $p = (new Previews($this->app))->stable('staging', 'staging', $this->user());
         $s->recordPreview($this->app->siteUrl($this->req) . Previews::urlPrefix($p['token']) . '/', $p['result']);
-        return Response::redirect(self::SELF . '?r=review');
+        return $this->done('review', 'The preview is up to date.');
     }
 
     /** Staging → site/ → live build. Without staging, just builds site/ (e.g. after redirect changes). */
@@ -581,7 +599,7 @@ final class AdminApp
     private function rPostRevoke(): Response
     {
         (new Previews($this->app))->revoke($this->req->input('token'));
-        return Response::redirect(self::SELF . '?r=builds');
+        return $this->done('builds', 'The preview link was revoked. It stops working right away.');
     }
 
     // ---------------------------------------------------------------- submissions
@@ -630,7 +648,7 @@ final class AdminApp
         $id = (int) $this->req->input('id');
         $this->db->run('DELETE FROM submissions WHERE id = ?', [$id]);
         $this->db->audit('admin', 'delete-submission', (string) $id, $this->user());
-        return Response::redirect(self::SELF . '?r=submissions');
+        return $this->done('submissions', 'The submission was deleted.');
     }
 
     private function rGetSubscribers(): Response
@@ -799,13 +817,42 @@ final class AdminApp
         if (!is_array($file) || ($file['error'] ?? 1) !== UPLOAD_ERR_OK || !$this->isUploaded((string) $file['tmp_name'])) {
             throw new LouException('Upload a site .zip');
         }
-        $r = (new DesignImport($this->app))->toDraft((string) $file['tmp_name'], $this->draft());
-        $this->db->audit('admin', 'design-upload', count($r['written']) . ' written, ' . count($r['deleted']) . ' deleted, '
+        $name = mb_substr(basename(str_replace('\\', '/', (string) ($file['name'] ?? ''))), 0, 100) ?: 'a zip';
+        $draft = $this->draft();
+        $draft->rebase();
+        $hadDraft = $draft->hasChanges();
+        $r = (new DesignImport($this->app))->toDraft((string) $file['tmp_name'], $draft);
+        $this->db->audit('admin', 'design-upload', "$name: " . count($r['written']) . ' written, ' . count($r['deleted']) . ' deleted, '
             . count($r['skipped']) . ' skipped, ' . count($r['rejected']) . ' rejected', $this->user());
-        if ($r['written'] || $r['deleted']) {
-            (new Previews($this->app))->rebuild();
+        $r += ['name' => $name, 'submitted' => false, 'held' => null, 'ready' => false];
+        if (!$r['written'] && !$r['deleted']) {
+            return $this->page('Site design', 'design-import', $r);
         }
-        return $this->page('Site design imported', 'design-import', $r);
+        // Straight to staging when asked and the draft held nothing else, so the reviewer gets a ready preview.
+        // Otherwise it waits in the draft, and the result page says why.
+        $r['held'] = match (true) {
+            $this->req->input('review') !== '1' => null,
+            $hadDraft                           => 'draft',
+            (bool) $draft->conflicts()          => 'conflicts',
+            default                             => false,
+        };
+        if ($r['held'] === false) {
+            try {
+                $this->submitDraft($draft, "Site design from $name", false, $ready);
+                $r['submitted'] = true;
+                $r['ready'] = (bool) $ready;
+            } catch (LouException $e) {
+                $r['held'] = 'problems';
+                $r['problems'] = [$e->getMessage()];
+            }
+        }
+        if (!$r['submitted']) {
+            (new Previews($this->app))->rebuild('draft:' . $this->owner());
+        } elseif (!$r['skipped'] && !$r['rejected']) {
+            return $this->done('review', 'The new design from ' . $name . ' is on staging (' . self::plural(count($r['written']) + count($r['deleted']), 'change') . ').'
+                . ($r['ready'] ? ' Check the preview, then publish.' : ''));
+        }
+        return $this->page('Site design', 'design-import', $r);
     }
 
     /** Rebuild the live site and previews with the code on disk (after an update). */
@@ -864,7 +911,7 @@ final class AdminApp
     {
         $file = (new Backup($this->app))->create(null, null, 30);
         $this->db->audit('admin', 'backup', basename($file), $this->user());
-        return Response::redirect(self::SELF . '?r=backups');
+        return $this->done('backups', 'Backup created: ' . basename($file) . '.');
     }
 
     private function rGetDownload(): Response
@@ -877,6 +924,20 @@ final class AdminApp
         return new Response(200, (string) file_get_contents($path), [
             'Content-Type' => 'application/zip', 'Content-Disposition' => "attachment; filename=\"$name\"",
         ]);
+    }
+
+    private function rPostBackupDelete(): Response
+    {
+        $name = basename($this->req->input('file'));
+        $path = $this->app->varDir . "/backups/$name";
+        if (!preg_match('/^[a-z0-9._-]+\.zip$/i', $name) || !is_file($path)) {
+            throw new LouException('Unknown backup');
+        }
+        if (!unlink($path)) {
+            throw new LouException("Could not delete $name. Check the file permissions of var/backups.");
+        }
+        $this->db->audit('admin', 'backup-delete', $name, $this->user());
+        return $this->done('backups', "Backup $name deleted.");
     }
 
     private function rPostRestore(): Response
@@ -926,7 +987,11 @@ final class AdminApp
         usort($entries, fn ($a, $b) => strcmp($a['from'], $b['from']));
         Fs::writeJson($file, $entries);
         $this->db->audit('admin', 'redirect', "$action $from", $this->user());
-        return Response::redirect(self::SELF . '?r=redirects');
+        return $this->done('redirects', match ($action) {
+            'delete' => "Redirect from $from deleted.",
+            '410'    => "$from now answers 410 Gone.",
+            default  => "Redirect from $from saved.",
+        } . ' It goes live with the next publish.');
     }
 
     // ---------------------------------------------------------------- assistants
@@ -940,7 +1005,29 @@ final class AdminApp
         $previews->revokeSource('staging');
         $previews->rebuild();
         $this->db->audit('editor', 'reject-staging', implode(', ', $files), $this->user());
-        return $this->page('Rejected', 'message', ['message' => 'Everything on staging was discarded. The live site was not touched.']);
+        return $this->done('review', 'Everything on staging was discarded. The live site was not touched.');
+    }
+
+    /** Take single changes back off staging (they return to the live version); the rest stays for review. */
+    private function rPostStagingRevert(): Response
+    {
+        $s = Workspace::staging($this->app);
+        $files = array_values(array_intersect(array_filter((array) ($this->req->post['files'] ?? []), 'is_string'), $s->changedFiles()));
+        if (!$files) {
+            throw new LouException('That change is no longer on staging.');
+        }
+        $s->revert($files);
+        $previews = new Previews($this->app);
+        if (!$s->hasChanges()) {
+            $s->discard();
+            $previews->revokeSource('staging');
+            $previews->rebuild();
+        } else {
+            $p = $previews->staging($this->app->siteUrl($this->req), $this->user());
+            $previews->rebuild(null, $p ? [$p['token']] : []);
+        }
+        $this->db->audit('editor', 'unstage', implode(', ', $files), $this->user());
+        return $this->done('review', 'Took ' . self::plural(count($files), 'change') . ' off staging. The live site was not touched.');
     }
 
     // ---------------------------------------------------------------- history
@@ -967,26 +1054,32 @@ final class AdminApp
         $done = (new History($this->app))->restoreInto($this->draft(), $this->req->input('id'), $side, $files ?: null);
         (new Previews($this->app))->rebuild('draft:' . $this->owner());
         $this->db->audit('editor', 'history-restore', $this->req->input('id') . " $side: " . implode(', ', $done), $this->user());
-        return Response::redirect(self::SELF . '?r=review');
+        return $this->done('review', 'Put ' . self::plural(count($done), 'file') . ' into your draft. Submit it to make it live.');
     }
 
     private function rGetAssistants(): Response
     {
-        return $this->page('Assistants', 'assistants', ['tokens' => $this->tokens()->all(), 'newToken' => null]);
+        // shown once: taken out of the session on the first page view after creating it
+        $new = $this->session->get('new_token');
+        if ($new !== null) {
+            $this->session->set('new_token', null);
+        }
+        return $this->page('Assistants', 'assistants', ['tokens' => $this->tokens()->all(), 'newToken' => is_string($new) ? $new : null]);
     }
 
     private function rPostTokenAdd(): Response
     {
         $token = $this->tokens()->create($this->req->input('name'));
         $this->db->audit('admin', 'token-add', $this->req->input('name'), $this->user());
-        return $this->page('Assistants', 'assistants', ['tokens' => $this->tokens()->all(), 'newToken' => $token]);
+        $this->session->set('new_token', $token);
+        return Response::redirect(self::SELF . '?r=assistants');
     }
 
     private function rPostTokenRevoke(): Response
     {
         $this->tokens()->revoke($this->req->input('id'));
         $this->db->audit('admin', 'token-revoke', $this->req->input('id'), $this->user());
-        return Response::redirect(self::SELF . '?r=assistants');
+        return $this->done('assistants', 'The token was revoked. The assistant using it has lost access.');
     }
 
     private function tokens(): Tokens
@@ -1013,6 +1106,37 @@ final class AdminApp
         return !is_file($live) || (Fs::readJson($live)['site_hash'] ?? '') !== Builder::siteHash($this->app);
     }
 
+    /** Redirect to a page after a POST, with a one-time notice shown at the top of it. */
+    private function done(string $route, string $message): Response
+    {
+        $this->session->set('flash', $message);
+        return Response::redirect(self::SELF . '?r=' . $route);
+    }
+
+    private static function plural(int $n, string $word): string
+    {
+        return $n . ' ' . $word . ($n === 1 ? '' : 's');
+    }
+
+    /**
+     * A timestamp as <time>: readable UTC in the HTML, and admin.js shows it in the browser's own time zone.
+     * Takes an ISO date, a SQLite "Y-m-d H:i:s" (UTC) or a Unix time.
+     */
+    public static function stamp(string|int|null $at, bool $dateOnly = false): string
+    {
+        if ($at === null || $at === '') {
+            return '';
+        }
+        try {
+            $d = is_int($at) ? new \DateTimeImmutable("@$at") : new \DateTimeImmutable($at, new \DateTimeZone('UTC'));
+        } catch (\Exception) {
+            return Html::escape((string) $at);
+        }
+        $d = $d->setTimezone(new \DateTimeZone('UTC'));
+        return '<time datetime="' . $d->format('Y-m-d\\TH:i:s\\Z') . '"' . ($dateOnly ? ' data-date' : '') . '>'
+            . $d->format($dateOnly ? 'Y-m-d' : 'Y-m-d H:i') . ($dateOnly ? '' : ' UTC') . '</time>';
+    }
+
     private function deny(): Response
     {
         return $this->page('Not allowed', 'message', ['message' => 'You are not allowed to do that.', 'error' => true], 403);
@@ -1021,6 +1145,15 @@ final class AdminApp
     private function time(): int
     {
         return $this->now ?? time();
+    }
+
+    private function takeFlash(): ?string
+    {
+        $flash = $this->session->get('flash');
+        if ($flash !== null) {
+            $this->session->set('flash', null);
+        }
+        return is_string($flash) ? $flash : null;
     }
 
     private function page(string $title, string $view, array $vars, int $status = 200, string $layout = 'layout'): Response
@@ -1041,6 +1174,8 @@ final class AdminApp
             'drafted'     => $this->session->get('user') ? count($this->draft()->changedFiles()) : 0,
             'needsRebuild' => $this->session->get('user') ? Updater::needsRebuild($this->app) : false,
             'louVersion'  => App::VERSION,
+            'flash'       => $this->takeFlash(),
+            'time'        => self::stamp(...),
         ];
         $render = static function (string $__file, array $__vars) use ($e): string {
             extract($__vars, EXTR_SKIP);

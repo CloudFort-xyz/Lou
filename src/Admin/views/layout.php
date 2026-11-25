@@ -53,7 +53,7 @@ $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
   <a class="topbar-brand" href="<?= $self ?>?r=dashboard" title="Dashboard">Lou</a>
   <a class="topbar-site" href="<?= $e($siteUrl) ?>" target="_blank" rel="noopener"><?= $e($siteName) ?> <?= $svg('ext') ?><span class="sr">(opens the live site)</span></a>
   <?php if ($staged || $drafted): ?>
-    <a class="topbar-status" href="<?= $self ?>?r=review"><?= $staged ? (int) $staged . ' staged' : 'Draft' ?><span class="hide-sm"><?= $staged ? ', waiting to publish' : ' not submitted' ?></span></a>
+    <a class="topbar-status" href="<?= $self ?>?r=review"><?= $staged ? (int) $staged . ' staged' : 'Draft' ?><span class="hide-sm"><?= $staged ? ',&nbsp;waiting to publish' : '&nbsp;not submitted' ?></span></a>
   <?php endif ?>
   <span class="topbar-spacer"></span>
   <span class="topbar-user"><span class="hide-sm">Signed in as </span><strong><?= $e($user) ?></strong> <span class="topbar-role"><?= $e($role) ?></span></span>
@@ -86,6 +86,7 @@ $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
     <?php if ($role === 'admin'): ?><form method="post" action="<?= $self ?>?r=rebuild" class="inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="btn" type="submit">Rebuild now</button></form>
     <?php else: ?>Ask an admin to rebuild it under Updates.<?php endif ?></div>
 <?php endif ?>
+<?php if (!empty($flash)): ?><div class="notice notice-ok" role="status"><?= $e($flash) ?></div><?php endif ?>
 <?= $content ?>
 </main>
 <script src="/_lou/admin.js" defer></script>

@@ -457,7 +457,7 @@ test('admin: a client site zip puts template and asset changes into the draft, c
     ]);
     $r = $admin->handle(admin_req('POST', 'design-upload', [], $html, ['site' => ['tmp_name' => $zip, 'error' => UPLOAD_ERR_OK, 'name' => 'client-main.zip']]));
     check($r->status === 200, strip_tags($r->body));
-    contains($r->body, 'are in your draft');
+    contains($r->body, 'The new design is in your draft');
     contains($r->body, 'templates/evil.php', 'unsafe template reported');
     $draft = draft_site($app);
     contains((string) file_get_contents("$draft/templates/page.php"), '<!-- v2 -->');

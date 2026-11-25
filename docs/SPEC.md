@@ -238,7 +238,13 @@ Deploy options:
   takes a zip of a client repository. Its templates and assets are planned
   with the same rule as `deploy --site` (`Deployer::planDesign`), checked
   like assistants' templates, and written into the uploader's draft, so they
-  go live through Review. `var/deploy-design.pending.json` holds what the
+  go live through Review. With "Send it to Review right away" (the default)
+  and nothing else in the draft, the import is submitted to staging at once
+  with the summary "Site design from <zip>" and its preview is built; with
+  other edits in the draft, a conflict or a validation problem it waits in
+  the draft and the result page says why. On the first import (no
+  `var/deploy-design.json`) files that exist only on the server are kept,
+  never deleted. `var/deploy-design.pending.json` holds what the
   import wrote until a publish makes it live (`DesignImport::confirm`).
 - **Git (optional):** the server's Git clone is kept separate from the live
   install. `php lou deploy DIR` copies the code (`src/`, `stubs/`,
@@ -440,8 +446,20 @@ your draft ──submit──▶ staging (shared) ──publish──▶ site/ �
   anyway. Assistants get an error telling them to re-read and redo.
 - **Staging** is the shared, reviewable next version of the site, with a
   stable preview link, diffs, the submitters' summaries, validation
-  problems and the redirect report. **Anyone who can edit can publish or
-  reject it** (decided 2026-11-25). Reject discards staging; drafts stay.
+  problems and the redirect report. Every submit (person or assistant)
+  builds the staging preview straight away. **Anyone who can edit can
+  publish or reject it** (decided 2026-11-25). Reject discards staging;
+  drafts stay. Single changes can be taken off staging again ("Undo",
+  `staging-revert`): the file returns to the live version.
+- **The Review screen** is written for clients first (2026-11-25): a
+  draft → staging → live strip, then each change in plain words
+  (`Content\ChangeList`: "About us (English)", "Stylesheet: site.css"),
+  grouped (pages, site-wide text, menu and settings, design, images). JSON
+  content shows the fields that changed, short values as old → new and long
+  texts as a word diff with a few words of context; templates and styles
+  show added/removed line counts. Each change has **Edit** (pages: opens
+  the editor, the edit lands in the draft on top of staging) and **Undo**.
+  File paths, build warnings and line diffs sit under "Technical details".
 - **Publish** checks the staging revision (no blind publishing of
   something that changed during review), validates, takes a safety backup,
   records history, copies the changed files into `site/`, builds live,
