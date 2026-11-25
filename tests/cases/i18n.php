@@ -42,6 +42,12 @@ function i18n_keys(): array
     foreach (['ok', 'partial', 'failed', 'synced', 'added', 'modified', 'changed', 'deleted'] as $text) {
         $keys[$text] = 'dynamic';
     }
+    // the editor's undo/redo labels (AdminApp::historyState) and the item toolbar's errors (ContentStore::itemAction)
+    foreach (['Text edit', 'Image change', 'Image description', 'Page settings', 'Duplicate', 'Delete', 'Move', 'Change',
+        'Nothing to undo on this page', 'Nothing to redo on this page', 'This is already the first item', 'This is already the last item',
+        'The last item of a list can\'t be deleted. Ask your assistant to remove the whole section.'] as $text) {
+        $keys[$text] = 'dynamic';
+    }
     return $keys;
 }
 
@@ -199,4 +205,15 @@ test('cli: user add --lang sets the admin language, and user list shows it', fun
     check((bool) preg_match('/^anna\s+editor\s+hu\s/m', implode("\n", $list)), implode("\n", $list));
     exec("$lou user add bob --lang=xx --password='hosszu jelszo 1' --root=" . escapeshellarg($root) . ' 2>&1', $out2, $code2);
     check($code2 !== 0 && !isset((new Users("$root/var/users.json"))->all()['bob']), 'unknown languages are refused before the user is created');
+});
+
+test('admin: the editor\'s undo labels and item errors follow the admin language', function () {
+    [$admin, , $app] = admin_setup();
+    (new Users($app->varDir . '/users.json'))->setPrefs('bence', new Prefs(lang: 'hu'));
+    $r = $admin->handle(admin_req('POST', 'save', ['page' => 'about', 'lang' => 'hu', 'field' => 'title', 'type' => 'text', 'value' => 'Rólunk 2']));
+    check(json_decode($r->body, true)['history']['undo'] === 'Szövegszerkesztés', $r->body);
+    $r = $admin->handle(admin_req('POST', 'undo', ['page' => 'about', 'lang' => 'hu']));
+    check(json_decode($r->body, true)['done']['label'] === 'Szövegszerkesztés', $r->body);
+    $r = $admin->handle(admin_req('POST', 'undo', ['page' => 'about', 'lang' => 'hu']));
+    check($r->status === 422 && json_decode($r->body, true)['message'] === 'Ezen az oldalon nincs mit visszavonni', $r->body);
 });

@@ -180,7 +180,54 @@
     status.className = error ? 'alert alert-error' : 'muted';
   }
 
-  function reloadPreview(path) {
+  // undo / redo (server side, per page; see EditHistory.php)
+  var undoBtn = document.getElementById('undo');
+  var redoBtn = document.getElementById('redo');
+  function setHistory(h) {
+    if (!h) return;
+    [[undoBtn, h.undo, t('Undo: {label}'), t('Nothing to undo')], [redoBtn, h.redo, t('Redo: {label}'), t('Nothing to redo')]].forEach(function (b) {
+      b[0].disabled = !b[1];
+      b[0].title = b[1] ? b[2].replace('{label}', b[1]) : b[3];
+    });
+  }
+  setHistory({ undo: undoBtn.dataset.label || null, redo: redoBtn.dataset.label || null });
+  function undoRedo(which) {
+    var btn = which === 'undo' ? undoBtn : redoBtn;
+    if (btn.disabled) return;
+    btn.disabled = true;
+    say(which === 'undo' ? t('Undoing…') : t('Redoing…'));
+    post(which, {}).then(function (res) {
+      if (res.ok) {
+        done(res);
+        var label = res.done.label + (res.done.lang !== state.lang ? ' (' + res.done.lang.toUpperCase() + ')' : '');
+        say(which === 'undo' ? t('Undone: {label}.', { label: label }) : t('Redone: {label}.', { label: label }));
+      } else {
+        say(res.message || t('Failed'), true);
+        refreshHistory();
+      }
+    });
+  }
+  undoBtn.addEventListener('click', function () { undoRedo('undo'); });
+  redoBtn.addEventListener('click', function () { undoRedo('redo'); });
+  function shortcut(e) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return null;
+    var k = e.key.toLowerCase();
+    if (k === 'z') return e.shiftKey ? 'redo' : 'undo';
+    if (k === 'y' && !e.shiftKey) return 'redo';
+    return null;
+  }
+  document.addEventListener('keydown', function (e) {
+    var el = e.target;
+    if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return; // let fields undo their own typing
+    var which = shortcut(e);
+    if (which) { e.preventDefault(); undoRedo(which); }
+  });
+
+  // text being typed is kept in localStorage by editor.js until the server has it
+  function unsavedKey(field) { return 'lou:unsaved:' + state.page + ':' + state.lang + ':' + field; }
+  function forget(field) { try { localStorage.removeItem(unsavedKey(field)); } catch (e) { /* storage blocked */ } }
+
+  function reloadPreview(path, flash) {
     var win = frame.contentWindow;
     var y = win ? win.scrollY : 0;
     var url = new URL(frame.src, location.href);
@@ -194,14 +241,16 @@
     frame.addEventListener('load', function once() {
       frame.removeEventListener('load', once);
       try { frame.contentWindow.scrollTo(0, y); } catch (e) { /* ignore */ }
+      if (flash) frame.contentWindow.postMessage({ lou: 'flash', item: flash }, location.origin);
     });
     frame.src = url.toString();
   }
 
-  function done(res, path) {
+  function done(res, path, flash) {
     if (res.ok) {
       say(res.draft ? t('Saved to your draft.') : t('Saved.'));
-      reloadPreview(path);
+      setHistory(res.history);
+      reloadPreview(path, flash);
     } else {
       say(res.message || t('Saving failed'), true);
       reloadPreview();
@@ -216,6 +265,8 @@
     post('meta', new FormData(metaForm)).then(function (res) { done(res, res.path); });
   });
 
+  function refreshHistory() { loadMeta(); }
+
   function loadMeta() {
     fetch(self + '?r=meta&page=' + encodeURIComponent(state.page) + '&lang=' + encodeURIComponent(state.lang), {
       headers: { Accept: 'application/json' }, credentials: 'same-origin'
@@ -225,6 +276,7 @@
         if (metaForm.elements[k]) metaForm.elements[k].value = m[k] || '';
       });
       if (metaForm.elements.slug) metaForm.elements.slug.closest('label').hidden = m.special;
+      setHistory(m.history);
       document.title = t('Edit: {title}', { title: m.title }) + ' · Lou';
       document.querySelectorAll('.langs a').forEach(function (a) {
         var u = new URL(a.href);
@@ -260,7 +312,21 @@
       }
     } else if (m.lou === 'save') {
       say(t('Saving…'));
-      post('save', { field: m.field, type: m.type, value: m.value }).then(function (res) { done(res); });
+      post('save', { field: m.field, type: m.type, value: m.value }).then(function (res) {
+        if (res.ok) forget(m.field);
+        done(res);
+      });
+    } else if (m.lou === 'item') {
+      say(m.action === 'delete' ? t('Deleting…') : m.action === 'duplicate' ? t('Duplicating…') : t('Moving…'));
+      post('item', { item: m.item, action: m.action }).then(function (res) {
+        done(res, null, res.ok && res.action !== 'delete' ? res.item : null);
+        if (res.ok) {
+          var what = { duplicate: t('Duplicated.'), delete: t('Deleted.'), up: t('Moved.'), down: t('Moved.') }[res.action];
+          say(what + ' ' + (res.skipped.length ? t('Not changed in {langs}, because that list is different there.', { langs: res.skipped.join(', ').toUpperCase() }) : t('Saved to your draft.')));
+        }
+      });
+    } else if (m.lou === 'key') {
+      undoRedo(m.action);
     } else if (m.lou === 'image') {
       imageField = m.field;
       document.getElementById('image-current').src = m.src || '';

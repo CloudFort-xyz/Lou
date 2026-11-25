@@ -107,6 +107,81 @@ final class ContentStore
         });
     }
 
+    public const ITEM_ACTIONS = ['duplicate', 'delete', 'up', 'down'];
+    public const MAX_ITEMS = 100;
+
+    /**
+     * Duplicate, delete or move one item of a list field (e.g. "features.2" in "features": [...]).
+     * Only lists that already exist in the content can change, so the template decides what repeats.
+     *
+     * The same change is made in every language whose list has the same length, so item N stays the
+     * same item in every language. Each language duplicates its own text. Languages whose list differs
+     * are left alone and returned, so the editor can say so.
+     *
+     * @return array{index: int, skipped: list<string>} index: where the item is now (the copy, for duplicate)
+     */
+    public function itemAction(string $id, string $lang, string $path, string $action): array
+    {
+        if (!in_array($action, self::ITEM_ACTIONS, true)) {
+            throw new LouException("Unknown item action '$action'");
+        }
+        $parts = self::segments($path);
+        $index = array_pop($parts);
+        if ($parts === [] || !ctype_digit($index)) {
+            throw new LouException("'$path' is not a list item");
+        }
+        $listPath = implode('.', $parts);
+        $i = (int) $index;
+        $list = self::get($this->read($id, $lang)['fields'] ?? [], $listPath);
+        if (!is_array($list) || !array_is_list($list) || !array_key_exists($i, $list)) {
+            throw new LouException("'$path' is not a list item");
+        }
+        $count = count($list);
+        $to = match ($action) {
+            'duplicate' => $count >= self::MAX_ITEMS ? throw new LouException('This list is full (' . self::MAX_ITEMS . ' items)') : $i + 1,
+            'delete'    => $count <= 1 ? throw new LouException('The last item of a list can\'t be deleted. Ask your assistant to remove the whole section.') : min($i, $count - 2),
+            'up'        => $i === 0 ? throw new LouException('This is already the first item') : $i - 1,
+            'down'      => $i === $count - 1 ? throw new LouException('This is already the last item') : $i + 1,
+        };
+
+        $originals = [];
+        $skipped = [];
+        foreach ($this->app->config['languages'] as $l) {
+            $file = $this->app->siteDir . "/content/pages/$id/$l.json";
+            if (!is_file($file)) {
+                continue;
+            }
+            $data = Fs::readJson($file);
+            $items = self::get($data['fields'] ?? [], $listPath);
+            if (!is_array($items) || !array_is_list($items) || count($items) !== $count) {
+                $skipped[] = $l;
+                continue;
+            }
+            switch ($action) {
+                case 'duplicate':
+                    array_splice($items, $i + 1, 0, [$items[$i]]);
+                    break;
+                case 'delete':
+                    array_splice($items, $i, 1);
+                    break;
+                default:
+                    [$items[$i], $items[$to]] = [$items[$to], $items[$i]];
+            }
+            $data['fields'] = self::put($data['fields'] ?? [], $listPath, $items, true);
+            $originals[$file] = (string) file_get_contents($file);
+            $this->replace($file, self::encode($data));
+        }
+        try {
+            Site::load($this->app);
+        } catch (LouException $e) {
+            foreach ($originals as $file => $contents) {
+                $this->replace($file, $contents);
+            }
+            throw $e;
+        }
+        return ['index' => $to, 'skipped' => $skipped];
+    }
+
     /** Templates whose pages editors may duplicate and delete (site config admin.repeatable). */
     public function isRepeatable(string $id): bool
     {
@@ -186,7 +261,7 @@ final class ContentStore
         $file = $this->file($id, $lang);
         $original = (string) file_get_contents($file);
         $data = $fn(Fs::readJson($file));
-        $this->replace($file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n");
+        $this->replace($file, self::encode($data));
         // the whole site must still load with the change (e.g. no duplicate slugs); otherwise undo it
         try {
             Site::load($this->app);
@@ -194,6 +269,11 @@ final class ContentStore
             $this->replace($file, $original);
             throw $e;
         }
+    }
+
+    private static function encode(array $data): string
+    {
+        return json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
     }
 
     private function replace(string $file, string $contents): void

@@ -26,7 +26,9 @@ final class I18n
         'Working…', 'Copied', 'Press Ctrl+C', 'Saved to your draft.', 'Saved.', 'Saving failed', 'Saving…',
         'Server error ({status})', 'Uploading…', 'Edit: {title}', 'Creating the link…',
         'Live viewer link, valid for a day', 'Preview link, valid for {days} days', '{text}, copied to the clipboard.', 'Failed',
-        'Expand all', 'Collapse all',
+        'Expand all', 'Collapse all', 'Undo: {label}', 'Redo: {label}', 'Nothing to undo', 'Nothing to redo',
+        'Undoing…', 'Redoing…', 'Undone: {label}.', 'Redone: {label}.', 'Deleting…', 'Duplicating…', 'Moving…',
+        'Duplicated.', 'Deleted.', 'Moved.', 'Not changed in {langs}, because that list is different there.',
     ];
 
     /** @param array<string, string> $messages */

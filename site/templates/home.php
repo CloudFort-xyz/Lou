@@ -9,7 +9,7 @@
 </section>
 <section class="features">
   <?php foreach ($v->field('features', []) as $i => $f): ?>
-    <article class="feature">
+    <article class="feature"<?= $v->item("features.$i") ?>>
       <h2<?= $v->editable("features.$i.title") ?>><?= $v->text("features.$i.title") ?></h2>
       <p<?= $v->editable("features.$i.text") ?>><?= $v->text("features.$i.text") ?></p>
     </article>
