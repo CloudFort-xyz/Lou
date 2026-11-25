@@ -1,6 +1,6 @@
 # Lou: specification
 
-Status: draft v0.1 (2026-11-25)
+Status: draft v0.2 (2026-11-25)
 
 ## 1. What Lou is
 
@@ -46,41 +46,53 @@ sites that are mostly content and have very little interaction.
 lou/                      ← repository / install root (NOT web-accessible)
 ├── lou                   ← CLI: php lou build | serve | …
 ├── src/                  ← Lou core (namespace Lou\)
+├── vendor-bundled/       ← bundled single libraries (PHPMailer), no Composer needed
 ├── stubs/                ← files copied verbatim into every build
-│   ├── .htaccess         ← security headers, caching, PHP lockdown
-│   └── _lou/             ← endpoint stubs (form.php, subscribe.php …)
+│   ├── .htaccess         ← security headers, caching, PHP lockdown (+ generated redirects)
+│   └── _lou/             ← endpoint stubs: submit.php, admin/, mcp.php, preview.php
 ├── site/                 ← THE SITE (what clients and LLMs change)
-│   ├── config.php        ← site settings (no secrets)
+│   ├── config.php        ← site settings, languages, forms (no secrets)
+│   ├── menu.json         ← menu structure (page ids only)
+│   ├── redirects.json    ← old URL → page id / URL, maintained automatically
 │   ├── content/
-│   │   ├── site.json     ← global content: company info, menu, footer
-│   │   └── pages/*.json  ← one file per page
+│   │   ├── site/<lang>.json      ← global content per language: company info, footer
+│   │   ├── strings/<lang>.json   ← UI strings ("Read more", form labels, errors)
+│   │   └── pages/<page-id>/<lang>.json   ← one folder per page, one file per language
 │   ├── templates/        ← plain PHP templates + partials
 │   └── assets/           ← css, js, images, fonts
 ├── var/                  ← runtime data (gitignored)
-│   ├── lou.sqlite        ← form submissions, subscribers, audit log
+│   ├── lou.sqlite        ← submissions, subscribers, rate limits, audit log, changesets
 │   ├── staging/          ← staging copy of site/ for LLM changes
-│   └── builds/           ← build history for rollback
-├── .env.php              ← secrets: SMTP, API keys (gitignored)
+│   ├── previews/         ← preview builds, one per token
+│   └── builds/           ← build history + URL manifests, for rollback and redirects
+├── .env.php              ← secrets: SMTP, API keys, captcha keys (gitignored)
 └── public/               ← BUILD OUTPUT = web root (gitignored)
 ```
 
 On KeyHelp (or any panel) the domain's document root points at `lou/public`.
 If a host can't change the document root, a fallback layout puts Lou in a
-sibling directory and builds into `public_html`, with `output_dir` set in config.
+sibling directory and builds into `public_html`, with `output_dir` set in
+config.
 
 ## 4. Content model
 
-### Pages
+### Pages and stable ids
 
-Each page is a JSON file in `site/content/pages/`. The file name is the
-slug, and `home.json` builds to `/index.html`.
+Each page is a **folder** named after its **stable page id**, with one JSON
+file per language:
+
+```
+site/content/pages/about/en.json
+site/content/pages/about/hu.json
+```
 
 ```json
 {
+  "slug": "about-us",
   "title": "About us",
-  "template": "page",
+  "menu_label": "About",
   "description": "Meta description for search engines",
-  "menu": true,
+  "template": "page",
   "fields": {
     "hero": { "title": "…", "text": "…", "image": { "src": "/assets/img/x.webp", "alt": "…" } },
     "body": "<p>Rich text, sanitised HTML</p>"
@@ -88,21 +100,50 @@ slug, and `home.json` builds to `/index.html`.
 }
 ```
 
+- The **page id** (folder name) never changes and never appears in URLs.
+  The **slug** is per language and can change freely. That's what makes
+  renaming and redirects safe (see 6.1).
+- `home` is a reserved id that builds to the language root.
+- Nested pages: `"parent": "services"` in the JSON. The URL becomes
+  `/services-slug/child-slug/`, built from each language's slugs.
 - **`fields` is the client-editable surface.** The inline editor can only
-  change values inside `fields`. It never touches templates, `template`, or
+  change values inside `fields` (plus `title`, `menu_label` and
+  `description`). It never touches templates, `template`, `slug` or
   structure.
-- Field types are inferred from the template (see below): plain text, rich
-  text (a small allow-list of tags), image (`src` + `alt`) and link
-  (`href` + `label`).
-- Nested slugs (for example `services/consulting`) map to
-  `pages/services/consulting.json`.
-- Multilingual support is planned (`pages/<lang>/…`) but out of scope for v0.1.
+- Field types are inferred from the template: plain text, rich text (a small
+  allow-list of tags), image (`src` + `alt`) and link (`page` id or `href`,
+  plus `label`).
+- If a page lacks a language file, it isn't built in that language. The
+  build lists it as a warning, and the language switcher hides it.
 
-### Global content
+### Languages
 
-`site/content/site.json` holds the company name, contact details, the
-menu, the footer and social links. The menu belongs to the LLM and the
-admin. Clients can edit labels but not the structure.
+```php
+// site/config.php
+'languages'        => ['hu', 'en'],
+'default_language' => 'hu',
+'prefix_default'   => false,   // hu at /, en at /en/
+```
+
+- URLs: `/rolunk/` (hu, default, no prefix) and `/en/about-us/` (en).
+- Every page gets `<html lang>`, `hreflang` alternates (including
+  `x-default`), and `sitemap.xml` lists the alternates.
+- The language switcher links to the **same page** in the other language,
+  not to the home page.
+- No server-side language detection or redirect on `/`. It's static, and
+  better for SEO and caching. An optional small JS hint ("This page is
+  available in English") can be added later.
+
+### Global content, menu and strings
+
+- `site/content/site/<lang>.json`: company name, address, footer text,
+  social links.
+- `site/menu.json`: the **structure** only, as a list of page ids (nested
+  for dropdowns). Labels come from each page's `menu_label` per language,
+  so translating never touches the structure, and an LLM restructuring the
+  menu never touches the translations.
+- `site/content/strings/<lang>.json`: UI strings used by templates and
+  forms (`$v->t('form.send')`).
 
 ### Why JSON and not Markdown
 
@@ -121,11 +162,16 @@ Templates are plain PHP files that receive a `View` helper as `$v`.
 <section class="hero">
   <h1 <?= $v->editable('hero.title') ?>><?= $v->text('hero.title') ?></h1>
   <?= $v->image('hero.image', class: 'hero__img') ?>
+  <a href="<?= $v->url('contact') ?>"><?= $v->t('cta.contact') ?></a>
 </section>
 ```
 
 - Output is **escaped by default**. `text()` escapes, `html()` outputs
   sanitised rich text, and `raw()` exists but is flagged in review.
+- **Links use page ids, never paths:** `$v->url('contact')` resolves to the
+  current language's URL for that page. Renaming a slug therefore never
+  breaks internal links, and the build fails loudly on a link to a page id
+  that doesn't exist.
 - `editable()` prints nothing in production builds. In edit and preview
   builds it adds `data-lou-field="hero.title"` so the inline editor knows
   what to edit. **Production HTML contains no CMS markers.**
@@ -135,14 +181,19 @@ Templates are plain PHP files that receive a `View` helper as `$v`.
 
 `php lou build` (and the admin's "Publish" button, which calls the same code):
 
-1. Loads config, `site.json` and all pages, then validates them.
-2. Renders every page to `<slug>/index.html` (pretty URLs, no rewrites
-   needed).
+1. Loads config, menu, global content and all pages, then validates them
+   (missing templates, unknown page ids in links or the menu, duplicate
+   slugs).
+2. Renders every page in every language to `<path>/index.html` (pretty
+   URLs, no rewrites needed).
 3. Copies `site/assets/`, then `stubs/` (`.htaccess`, `_lou/*.php`).
-4. Generates `sitemap.xml` and `robots.txt`.
-5. Writes everything into a fresh temp directory next to the output, then
-   **swaps it in atomically** (rename). This prevents half-deployed states. The
-   previous build is kept in `var/builds/` for one-click rollback.
+4. Generates the redirect rules (6.1), `sitemap.xml` (with hreflang
+   alternates), `robots.txt` and a `404.html` per language.
+5. Writes a **URL manifest** (`page id + language → URL`) into
+   `var/builds/<id>/manifest.json`.
+6. Writes everything into a fresh temp directory next to the output, then
+   **swaps it in atomically** (rename). This prevents half-deployed states.
+   The previous build is kept in `var/builds/` for one-click rollback.
 
 Image processing (resizing and WebP via GD) happens at upload time in the
 admin, not at build time, so builds stay fast.
@@ -153,49 +204,108 @@ Deploy options:
 - **Git (optional):** pull on the server (KeyHelp supports deploy hooks or a
   cron `git pull`), then `php lou build`.
 
-## 7. Runtime endpoints (`public/_lou/`)
+### 6.1 Renames and redirects
 
-Each endpoint is a tiny stub that `require`s Lou core from outside the
-web root, so a misconfigured server can never leak core source.
+Redirects are derived automatically, so it doesn't matter whether a change
+came from the editor, an LLM or a hand edit over FTP.
 
-| Endpoint | Purpose |
-|---|---|
-| `form.php` | Contact forms: validate, store in SQLite, send email |
-| `subscribe.php` | Newsletter sign-up, forwarded to a provider adapter |
-| `admin/` | Inline editor + publish/approve UI (session auth) |
-| `mcp.php` | LLM bridge (token/OAuth auth), see section 9 |
+- Every build compares the new URL manifest with the previous live one.
+- **Moved:** a page id and language whose URL changed (slug renamed, or the
+  page moved under a new parent). Lou adds `old URL → page id` to
+  `site/redirects.json` automatically. Because the target is a page id, a
+  later rename just updates the target, so there are never redirect chains.
+- **Gone:** a URL whose page id was deleted. The build (and the LLM approval
+  screen) lists it and asks for a redirect target or **410 Gone**. Until
+  someone answers, it defaults to a 301 to the language's home page.
+- Manual entries (`/old-campaign/ → contact`, or to an external URL) can be
+  added in the admin or by an LLM.
+- **Output:** `RewriteRule`/`Redirect 301` lines generated into
+  `public/.htaccess`, with a documented nginx `map` snippet as an
+  alternative. For hosts without either, the old path also gets a tiny
+  static HTML file with `<meta http-equiv="refresh">` and a canonical link.
+- Redirect loops and redirects that shadow a live URL are build errors.
 
-### Forms
+## 7. Runtime endpoint for the site (`public/_lou/submit.php`)
 
-- Forms are **defined in config** (`site/config.php` → `forms`): fields,
-  validation rules, recipients, which mailer to use, and whether captcha is
-  on.
-- Spam protection works in layers: a honeypot field, a minimum fill time,
-  per-IP rate limiting (SQLite), and **optional captcha** (Cloudflare
+All visitor-facing interaction goes through **one endpoint**,
+`/_lou/submit.php`. The admin (`/_lou/admin/`), the LLM bridge
+(`/_lou/mcp.php`) and the preview passthrough (`/_lou/preview.php`) stay
+separate, because they have different auth and very different risk
+profiles.
+
+Why one endpoint for the site:
+- There's one place to harden: CSRF and origin checks, rate limiting,
+  honeypot, captcha, size limits and logging are written once and apply to
+  everything.
+- A newsletter sign-up is really just a small form with a different action.
+- There's less surface area, and a new form type is configuration, not a
+  new PHP file.
+
+Each stub is three lines that `require` Lou core from outside the web
+root, so a misconfigured server can never leak core source.
+
+### Forms = definitions + actions
+
+Every form (contact, newsletter, a quote request…) is defined in
+`site/config.php`. The HTML posts `form=<id>`, and the endpoint looks the
+definition up. Unknown ids are rejected.
+
+```php
+'forms' => [
+  'contact' => [
+    'fields'  => ['name' => 'required|max:100', 'email' => 'required|email',
+                  'message' => 'required|max:5000', 'consent' => 'accepted'],
+    'captcha' => 'turnstile',            // or 'recaptcha', or null
+    'actions' => [
+      ['store'],                         // always first: saved even if email fails
+      ['email', 'to' => 'info@client.hu', 'template' => 'contact'],
+      ['webhook', 'url_env' => 'ZAPIER_CONTACT_URL'],
+    ],
+    'success' => ['page' => 'thank-you'],   // page id: redirect target without JS
+  ],
+  'newsletter' => [
+    'fields'  => ['email' => 'required|email', 'consent' => 'accepted'],
+    'captcha' => null,
+    'actions' => [['store'], ['subscribe', 'provider' => 'mailerlite', 'list' => '…']],
+  ],
+],
+```
+
+- **Actions** run in order: `store` (SQLite), `email` (Mailer),
+  `subscribe` (NewsletterProvider) and `webhook` (generic JSON POST). If an
+  action after `store` fails, the submission is kept and marked for retry,
+  and the admin shows the failure.
+- **Spam protection** applies to every form: a honeypot field, a minimum
+  fill time (signed timestamp), a per-IP plus per-form rate limit (SQLite),
+  an `Origin`/`Referer` check, and **optional captcha** (Cloudflare
   Turnstile or Google reCAPTCHA v3), verified server-side.
-- Forms work **without JavaScript** (plain POST with a redirect to a
-  thank-you page). With JS they submit via `fetch` and show inline messages.
-- Every submission is stored in SQLite, even if mailing fails. It's
-  viewable and exportable (CSV) in the admin.
+- Forms work **without JavaScript** (plain POST, then a redirect to the
+  success page in the visitor's language). With JS they submit via `fetch`,
+  get JSON back, and show inline messages. Error texts come from
+  `strings/<lang>.json`.
+- A static page can't carry a per-visitor CSRF token, so the protection is
+  the origin check, the signed timestamp and SameSite behaviour. This is
+  enough for anonymous submissions with no session.
 
 ### Pluggable integrations
 
 Three small interfaces, each with a config-selected implementation:
 
-- `Mailer`: `SmtpMailer` (v0.1, a minimal built-in SMTP client with
-  STARTTLS and auth). Later: `SesMailer`, `SendGridMailer`, and others.
+- `Mailer`: `PhpMailerMailer` (v0.1, SMTP via a **bundled PHPMailer**, no
+  Composer needed). Later: `SesMailer`, `SendGridMailer`, and others.
 - `NewsletterProvider`: `MailchimpProvider`, `MailerLiteProvider`,
   `WebhookProvider` (generic JSON POST for Integrately, IFTTT, Zapier, Make).
 - `Captcha`: `TurnstileCaptcha`, `RecaptchaCaptcha`, `NullCaptcha`.
 
-All HTTP calls use PHP's built-in curl. There's no SDK.
+All other HTTP calls use PHP's built-in curl. There's no SDK.
 
 ### Storage
 
-There's one SQLite file in `var/` (PDO, WAL mode). Tables: `submissions`,
-`subscribers` (a local copy plus provider sync status), `rate_limits`,
-`audit_log` (who changed what, from editor, LLM or CLI), and `changesets`
-(LLM proposals).
+There's one SQLite file in `var/` (PDO, WAL mode). Tables: `submissions`
+(form id, language, data, action results), `subscribers` (a local copy plus
+provider sync status), `rate_limits`, `audit_log` (who changed what, from
+editor, LLM or CLI), `changesets` (LLM proposals) and `previews` (tokens,
+expiry).
 
 ## 8. Admin and inline editor
 
@@ -206,6 +316,11 @@ There's one SQLite file in `var/` (PDO, WAL mode). Tables: `submissions`,
   `data-lou-field` markers) in an iframe. Clicking a marked element edits
   it in place: text is contenteditable, and images open an upload/replace
   dialog. Saving writes the JSON field and rebuilds the affected page.
+- The editor has a language switcher. Edits apply to the language being
+  viewed, and a "missing translations" list shows pages without a file for
+  some language.
+- Renaming a page (changing its slug) is allowed for admins, and the redirect is
+  created automatically (6.1).
 - Image upload checks the MIME type, re-encodes through GD (which strips
   EXIF and payloads), and generates responsive sizes and WebP.
 - Other screens: form submissions, subscribers, pending LLM changesets
@@ -218,13 +333,17 @@ without approval.
 
 ### Flow
 
-1. The assistant connects to the site's bridge endpoint.
+1. The assistant connects to the site's bridge endpoint (`/_lou/mcp.php`).
 2. It reads the site: pages, templates, menu, styles.
 3. It proposes changes. These are written to **`var/staging/`** (a copy of
    `site/`), never to `site/` directly.
-4. Lou builds staging into a **preview** with a secret, expiring URL.
-5. The assistant shares the preview link. A human reviews the diff and the
-   preview in the admin, then clicks **Approve**.
+4. Lou builds staging into a **preview** at a secret, expiring URL
+   (`/_lou/preview/<random token>/`, served from `var/previews/` through a
+   tiny PHP passthrough, with `noindex` headers). The link is **shareable**,
+   so the client can see it without logging in. It expires after 7 days by
+   default and can be revoked from the admin.
+5. A human reviews the diff, the preview and the **redirect report** (see
+   6.1) in the admin, then clicks **Approve**.
 6. Approve copies staging over `site/`, logs the change, optionally commits
    to Git, and builds live. **Reject** discards staging.
 
@@ -262,6 +381,8 @@ without approval.
 - Secrets live only in `.env.php` outside the web root.
 - Every write path (editor, bridge, forms) is authenticated or
   rate-limited, validated and logged.
+- Preview tokens are 128-bit random, expire, can be revoked, and are sent
+  with `X-Robots-Tag: noindex`.
 
 ## 11. Requirements
 
@@ -271,8 +392,9 @@ without approval.
 
 ## 12. Milestones
 
-1. **Spec and skeleton** (this PR): the builder, View/templates, an example
-   site, the CLI, smoke tests and CI.
+1. **Spec and skeleton** (this PR, then the skeleton): the builder,
+   View/templates, multilingual routing, redirects, an example site in two
+   languages, the CLI, smoke tests and CI.
 2. **Forms and integrations:** contact form, SQLite, SMTP, newsletter
    adapters, captcha, and the first real client site.
 3. **Admin and inline editor:** auth, field editing, image pipeline,
@@ -282,6 +404,8 @@ without approval.
 
 ## 13. Open questions
 
-- Multilingual sites: are they needed for the first client?
-- Should a preview be publicly shareable (secret link), or admin-only?
+- Which languages does the first client need, and which one is the default?
+- Should the default language live at `/` or at `/<lang>/` too?
+- Translation workflow: should the admin show the languages side by side? Could an LLM
+  draft missing translations into staging?
 - Git commit identity and push target on the server (deploy key?).
