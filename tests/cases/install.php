@@ -197,6 +197,15 @@ test('update: swaps in the code from a release zip, keeps site/, var/ and .env.p
     }
     $u->apply(release_zip('0.0.1'), true);
 
+    Fs::writeJson("$target/var/deployed-from.json", ['source' => dirname(__DIR__, 2)]);
+    try {
+        $u->apply(release_zip('9.0.0'));
+        check(false, 'installs deployed from a clone update from the clone');
+    } catch (LouException $e) {
+        contains($e->getMessage(), 'deployed from the Git clone');
+    }
+    unlink("$target/var/deployed-from.json");
+
     mkdir("$target/.git");
     try {
         $u->apply(release_zip('9.0.0'));

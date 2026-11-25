@@ -135,6 +135,8 @@ try {
                 echo "Deploying Lou from " . __DIR__ . " to $target\n";
                 try {
                     $r = (new Deployer(__DIR__))->deploy($target);
+                    // zip updates in the admin would be overwritten by the next deploy from this clone
+                    Lou\Support\Fs::writeJson("$target/var/deployed-from.json", ['source' => __DIR__, 'at' => gmdate('c')]);
                     echo '  updated: ' . implode(', ', $r['code']) . "\n";
                     echo $r['seeded'] ? "  site/ did not exist, seeded it from the repository\n" : "  site/ kept (the server's copy is the live content)\n";
                     lou_report_check(array_values(array_filter((new Requirements($target))->run(), fn ($i) => $i['level'] !== Requirements::OK)));
