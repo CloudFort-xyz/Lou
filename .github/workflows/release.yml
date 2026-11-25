@@ -1,0 +1,31 @@
+name: Release
+# Push a tag like v0.2.0 to publish lou-0.2.0.zip on the GitHub releases page.
+# The zip is what people install and update from without Git (see docs/install.md).
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: zip, pdo_sqlite, dom, intl, mbstring, sodium
+          coverage: none
+      - name: Tests
+        run: php tests/run.php
+      - name: Build the release zip
+        env:
+          # Created once with `php lou release-key`. Required as soon as src/Setup/release-key.pub is committed.
+          LOU_SIGNING_KEY: ${{ secrets.LOU_SIGNING_KEY }}
+        run: php lou release --version="${GITHUB_REF_NAME#v}" --out=dist
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Lou ${GITHUB_REF_NAME#v}" --generate-notes
