@@ -382,7 +382,8 @@ expiry).
   history, see submissions) and **admin** (also assistants/tokens,
   redirects, builds/rollback, backups, deleting submissions). Sessions are hardened: their own save path in
   `var/sessions`, strict mode, a `__Host-` cookie with Secure, HttpOnly and
-  SameSite=Strict, a 2 h idle and 12 h absolute timeout, CSRF tokens on every
+  SameSite=Lax (Strict would sign people out when they open an admin link
+  from another site), a 2 h idle and 12 h absolute timeout, CSRF tokens on every
   POST, a same-origin check, and login rate limiting. TOTP can come later.
 - **Previews are static builds at secret URLs** (`/_lou/p/<128-bit token>/`)
   inside the web root, so they need no PHP to view and work on any host.
