@@ -2,7 +2,7 @@
 <?php if ($live): ?><p>Live build: <code><?= $e($live['build']) ?></code>, published <?= $e(substr(str_replace('T', ' ', $live['at']), 0, 16)) ?> UTC.</p><?php endif ?>
 <h2>Previous builds</h2>
 <?php if (!$builds): ?><p class="muted">None yet.</p><?php else: ?>
-<table class="table">
+<table class="table list">
   <tbody>
   <?php foreach ($builds as $b): ?>
     <tr><td><code><?= $e($b) ?></code></td><td>
@@ -17,7 +17,7 @@
 <?php endif ?>
 <h2>Shared preview links</h2>
 <?php if (!$previews): ?><p class="muted">None.</p><?php else: ?>
-<table class="table">
+<table class="table list">
   <tbody>
   <?php foreach ($previews as $token => $p): ?>
     <tr><td><code>/_lou/p/<?= $e(substr($token, 0, 6)) ?>…</code> by <?= $e($p['by'] ?? '?') ?></td>

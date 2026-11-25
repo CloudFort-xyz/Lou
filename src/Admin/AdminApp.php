@@ -42,6 +42,7 @@ final class AdminApp
         'GET login'           => null,
         'POST login'          => null,
         'POST logout'         => 'editor',
+        'GET dashboard'       => 'editor',
         'GET pages'           => 'editor',
         'GET edit'            => 'editor',
         'GET meta'            => 'editor',
@@ -92,7 +93,7 @@ final class AdminApp
     public function handle(Request $req): Response
     {
         $this->req = $req;
-        $route = (string) ($req->query['r'] ?? 'pages');
+        $route = (string) ($req->query['r'] ?? 'dashboard');
         $key = "{$req->method} $route";
         if (!array_key_exists($key, self::ROUTES)) {
             return Response::html(404, 'Not found');
@@ -198,6 +199,32 @@ final class AdminApp
         }
         $host = explode(':', $this->req->header('host'))[0];
         return strtolower((string) parse_url($source, PHP_URL_HOST)) === strtolower($host);
+    }
+
+    // ---------------------------------------------------------------- dashboard
+
+    private function rGetDashboard(): Response
+    {
+        $site = Site::load($this->app);
+        $ids = [];
+        foreach ($site->allPages() as $p) {
+            $ids[$p->id] = true;
+        }
+        $staging = Workspace::staging($this->app);
+        $since = gmdate('Y-m-d', $this->time() - 7 * 86400);
+        $live = is_file($this->app->varDir . '/live.json') ? Fs::readJson($this->app->varDir . '/live.json') : null;
+        return $this->page('Dashboard', 'dashboard', [
+            'site'        => $site,
+            'pageCount'   => count($ids),
+            'submissions' => (int) $this->db->run('SELECT COUNT(*) FROM submissions')->fetchColumn(),
+            'recentCount' => (int) $this->db->run('SELECT COUNT(*) FROM submissions WHERE created_at >= ?', [$since])->fetchColumn(),
+            'latest'      => $this->db->run('SELECT id, form, lang, status, created_at, data FROM submissions ORDER BY id DESC LIMIT 5')->fetchAll(),
+            'subscribers' => (int) $this->db->run('SELECT COUNT(*) FROM subscribers')->fetchColumn(),
+            'stagingOpen' => $staging->exists(),
+            'stagingSubs' => $staging->exists() ? count($staging->meta()['submissions']) : 0,
+            'history'     => array_slice((new History($this->app))->all(), 0, 5),
+            'live'        => $live,
+        ]);
     }
 
     // ---------------------------------------------------------------- pages + editor
@@ -757,7 +784,7 @@ final class AdminApp
             'role'        => $this->role(),
             'csrf'        => $this->csrf(),
             'self'        => self::SELF,
-            'route'       => (string) ($this->req->query['r'] ?? 'pages'),
+            'route'       => (string) ($this->req->query['r'] ?? 'dashboard'),
             'siteName'    => $this->app->config['name'],
             'baseUrl'     => $this->app->siteUrl($this->req),
             'baseUrlMissing' => !$this->app->baseUrlConfigured(),

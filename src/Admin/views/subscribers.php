@@ -1,6 +1,6 @@
 <h1>Subscribers</h1>
 <?php if (!$rows): ?><p class="muted">No newsletter sign-ups synced to a provider yet.</p><?php else: ?>
-<table class="table">
+<table class="table list">
   <thead><tr><th>Email</th><th>Name</th><th>Provider</th><th>Status</th><th>Updated (UTC)</th></tr></thead>
   <tbody>
   <?php foreach ($rows as $r): ?>

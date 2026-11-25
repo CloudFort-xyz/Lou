@@ -9,7 +9,7 @@ asort($targets);
 ?>
 <h1>Redirects</h1>
 <p class="muted">Created automatically when pages are renamed, moved or deleted. Removed pages point to the home page until you choose a better target.</p>
-<table class="table">
+<table class="table list">
   <thead><tr><th>From</th><th>To</th><th></th></tr></thead>
   <tbody>
   <?php foreach ($entries as $r): ?>

@@ -1,13 +1,15 @@
-<h1>Submissions</h1>
+<div class="page-head">
+  <h1>Submissions</h1>
+  <a class="btn" href="<?= $self ?>?r=export<?= $form !== '' ? '&amp;form=' . $e($form) : '' ?>">Download CSV</a>
+</div>
 <p class="filters">
   <a href="<?= $self ?>?r=submissions"<?= $form === '' ? ' aria-current="page"' : '' ?>>All</a>
   <?php foreach ($forms as $f): ?>
     <a href="<?= $self ?>?r=submissions&amp;form=<?= $e($f['form']) ?>"<?= $form === $f['form'] ? ' aria-current="page"' : '' ?>><?= $e($f['form']) ?> (<?= (int) $f['n'] ?>)</a>
   <?php endforeach ?>
-  <a class="btn" href="<?= $self ?>?r=export<?= $form !== '' ? '&amp;form=' . $e($form) : '' ?>">Download CSV</a>
 </p>
 <?php if (!$rows): ?><p class="muted">No submissions yet.</p><?php else: ?>
-<table class="table">
+<table class="table list">
   <thead><tr><th>#</th><th>Date (UTC)</th><th>Form</th><th>From</th><th>Status</th></tr></thead>
   <tbody>
   <?php foreach ($rows as $r): $d = json_decode($r['data'], true) ?: []; ?>

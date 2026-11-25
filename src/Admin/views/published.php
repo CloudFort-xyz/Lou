@@ -13,5 +13,5 @@
     <h2>Warnings</h2>
     <ul><?php foreach ($result['warnings'] as $w): ?><li><?= $e($w) ?></li><?php endforeach ?></ul>
   <?php endif ?>
-  <p><a href="<?= $self ?>">Back to pages</a></p>
+  <p><a href="<?= $self ?>?r=dashboard">Back to the dashboard</a></p>
 </div>
