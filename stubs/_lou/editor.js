@@ -26,13 +26,42 @@
     return b;
   }
   function typeOf(node) { return node.dataset.louType || 'text'; }
-  function valueOf(node) { return typeOf(node) === 'html' ? node.innerHTML : node.innerText; }
+  function valueOf(node) {
+    if (typeOf(node) !== 'html') return node.innerText;
+    var c = node.cloneNode(true); // without the editor's own highlight classes
+    c.querySelectorAll('.lou-item-on, .lou-flash').forEach(function (n) {
+      n.classList.remove('lou-item-on', 'lou-flash');
+      if (!n.className) n.removeAttribute('class');
+    });
+    return c.innerHTML;
+  }
 
   var bar = el('div', 'lou-editbar');
   bar.hidden = true;
   document.body.appendChild(bar);
 
-  function hint(text) { bar.textContent = text; bar.hidden = !text; }
+  var mod = /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘' : 'Ctrl+';
+
+  // Bold/italic run through execCommand ourselves: browsers differ (Firefox's Ctrl+B opens the
+  // bookmarks sidebar instead), and the B / I buttons make it visible for people who don't use shortcuts.
+  function format(cmd) {
+    try { document.execCommand('styleWithCSS', false, false); } catch (e) { /* not supported */ }
+    document.execCommand(cmd, false, null);
+  }
+
+  function hint(text, rich) {
+    bar.textContent = '';
+    if (rich) {
+      [['bold', 'B', 'Bold (' + mod + 'B)'], ['italic', 'I', 'Italic (' + mod + 'I)']].forEach(function (f) {
+        var b = button(f[1], f[2], function () { format(f[0]); });
+        b.className = 'lou-format lou-format-' + f[0];
+        b.addEventListener('mousedown', function (e) { e.preventDefault(); }); // keep the text selection
+        bar.appendChild(b);
+      });
+    }
+    bar.appendChild(document.createTextNode(text));
+    bar.hidden = !text;
+  }
 
   // ------------------------------------------------------------ local backup of unsaved typing
   // The text being typed is kept in localStorage until the admin confirms the server saved it
@@ -80,7 +109,7 @@
   }
 
   document.addEventListener('click', function (e) {
-    if (e.target.closest('.lou-itembar, .lou-restore')) return; // our own toolbars
+    if (e.target.closest('.lou-itembar, .lou-restore, .lou-editbar')) return; // our own toolbars
     var node = e.target.closest('[data-lou-field]');
     if (!node) {
       if (active) {
@@ -101,14 +130,15 @@
       return;
     }
     active = node;
-    original = node.innerHTML;
+    original = valueOf(node);
     originalText = node.innerText;
     var plain = typeOf(node) === 'text';
     try { node.contentEditable = plain ? 'plaintext-only' : 'true'; } catch (err) { node.contentEditable = 'true'; }
     if (node.contentEditable !== 'plaintext-only' && node.contentEditable !== 'true') node.contentEditable = 'true';
     node.focus();
+    if (!plain) track(e.target); // the clicked paragraph gets its toolbar right away
     hint(plain ? 'Editing text. Enter or click outside to save, Esc to cancel.'
-      : 'Editing rich text. Ctrl+B bold, Ctrl+I italic. Click outside to save, Esc to cancel.');
+      : 'Select text, then B or I (' + mod + 'B, ' + mod + 'I). Click outside to save, Esc to cancel.', !plain);
   }, true);
 
   document.addEventListener('input', function () {
@@ -127,9 +157,14 @@
       }
       return;
     }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && /^[biu]$/i.test(e.key)) {
+      e.preventDefault(); // never let the browser take these while editing (Firefox: Ctrl+B = bookmarks sidebar)
+      if (typeOf(active) === 'html') format({ b: 'bold', i: 'italic', u: 'underline' }[e.key.toLowerCase()]);
+      return;
+    }
     if (e.key === 'Escape') { e.preventDefault(); finish(false); }
     else if (e.key === 'Enter' && typeOf(active) === 'text') { e.preventDefault(); finish(true); }
-  });
+  }, true);
 
   // paste as plain text into plain fields
   document.addEventListener('paste', function (e) {
@@ -139,22 +174,35 @@
     document.execCommand('insertText', false, text.replace(/\s+/g, ' '));
   });
 
-  // ------------------------------------------------------------ repeating items (data-lou-item)
-  // A small toolbar on the item under the pointer: duplicate, move, delete. The admin does the work.
+  // ------------------------------------------------------------ repeating items and paragraphs
+  // A small toolbar on the thing under the pointer: duplicate, move, delete.
+  // - data-lou-item elements (list items in the JSON): the admin does the work on the server.
+  // - paragraphs (any top-level block) inside a rich-text field: done right here in the HTML,
+  //   then saved like a text edit (or kept for "click outside to save" while the field is open).
 
   var itemBar = el('div', 'lou-itembar');
   itemBar.hidden = true;
   itemBar.setAttribute('role', 'toolbar');
   document.body.appendChild(itemBar);
-  var current = null, hideTimer = 0;
+  var current = null, kind = '', hideTimer = 0;
 
   function listOf(path) { return path.slice(0, path.lastIndexOf('.')); }
-  function siblings(path) {
-    var list = listOf(path);
+  function siblings(node) {
+    if (kind === 'block') return Array.prototype.slice.call(node.parentNode.children);
+    var list = listOf(node.dataset.louItem);
     return Array.prototype.filter.call(document.querySelectorAll('[data-lou-item]'), function (n) {
       var p = n.dataset.louItem;
       return listOf(p) === list && /^\d+$/.test(p.slice(list.length + 1));
     });
+  }
+
+  /** The top-level block (paragraph, list, heading…) of a rich-text field that contains target. */
+  function blockOf(target) {
+    var field = target.closest && target.closest('[data-lou-field][data-lou-type="html"]');
+    if (!field || target === field) return null;
+    var n = target;
+    while (n && n.parentNode !== field) n = n.parentNode;
+    return n && n.nodeType === 1 ? n : null;
   }
 
   function placeItemBar() {
@@ -164,48 +212,79 @@
     itemBar.style.left = Math.max(0, r.right + window.scrollX - itemBar.offsetWidth) + 'px';
   }
 
+  function flash(node) {
+    var r = node.getBoundingClientRect();
+    if (r.top < 0 || r.bottom > window.innerHeight) node.scrollIntoView({ block: 'center' });
+    node.classList.add('lou-flash');
+    setTimeout(function () { node.classList.remove('lou-flash'); }, 1600);
+  }
+
+  function blockAct(node, action) {
+    var field = node.parentNode;
+    var before = valueOf(field);
+    var focus = node;
+    if (action === 'duplicate') { focus = node.cloneNode(true); field.insertBefore(focus, node.nextSibling); }
+    else if (action === 'up' && node.previousElementSibling) field.insertBefore(node, node.previousElementSibling);
+    else if (action === 'down' && node.nextElementSibling) field.insertBefore(node.nextElementSibling, node);
+    else if (action === 'delete') { focus = null; field.removeChild(node); }
+    if (focus) focus.classList.remove('lou-item-on');
+    if (field === active) { backup(); field.focus(); }
+    else {
+      var value = valueOf(field);
+      store.set(prefix + field.dataset.louField, { field: field.dataset.louField, type: 'html', value: value, original: before, at: Date.now() });
+      send({ field: field.dataset.louField, type: 'html', value: value });
+      hint('Saving…');
+    }
+    if (focus) flash(focus);
+  }
+
   function act(action) {
-    send({ lou: 'item', item: current.dataset.louItem, action: action });
+    var node = current, k = kind;
     hideItemBar();
+    if (k === 'block') blockAct(node, action);
+    else send({ lou: 'item', item: node.dataset.louItem, action: action });
   }
 
   function fillItemBar(confirming) {
+    var what = kind === 'block' ? 'paragraph' : 'item';
     itemBar.textContent = '';
     if (confirming) {
-      itemBar.appendChild(el('span', '', 'Delete this?'));
-      itemBar.appendChild(button('Delete', 'Delete this item', function () { act('delete'); }));
+      itemBar.appendChild(el('span', '', 'Delete this ' + what + '?'));
+      itemBar.appendChild(button('Delete', 'Delete this ' + what, function () { act('delete'); }));
       itemBar.lastChild.className = 'lou-danger';
-      itemBar.appendChild(button('Keep', 'Keep this item', function () { fillItemBar(false); }));
+      itemBar.appendChild(button('Keep', 'Keep this ' + what, function () { fillItemBar(false); }));
       itemBar.lastChild.focus();
       return;
     }
-    var path = current.dataset.louItem;
-    var sib = siblings(path);
+    var sib = siblings(current);
     var i = sib.indexOf(current);
     var other = sib[i + 1] || sib[i - 1];
     var horizontal = false;
-    if (other) {
+    if (other && kind === 'item') {
       var a = current.getBoundingClientRect(), b = other.getBoundingClientRect();
       horizontal = Math.abs(a.top - b.top) < a.height / 2;
     }
-    itemBar.appendChild(button('⧉ Duplicate', 'Duplicate', function () { act('duplicate'); }));
+    itemBar.appendChild(button('⧉ Duplicate', 'Duplicate this ' + what, function () { act('duplicate'); }));
     var up = button(horizontal ? '←' : '↑', horizontal ? 'Move left' : 'Move up', function () { act('up'); });
     var down = button(horizontal ? '→' : '↓', horizontal ? 'Move right' : 'Move down', function () { act('down'); });
     up.disabled = i <= 0;
     down.disabled = i === -1 || i >= sib.length - 1;
     itemBar.appendChild(up);
     itemBar.appendChild(down);
-    var del = button('🗑', 'Delete', function () { fillItemBar(true); });
+    var del = button('🗑', 'Delete this ' + what, function () { fillItemBar(true); });
     del.disabled = sib.length <= 1;
-    if (del.disabled) del.title = 'The last item can\'t be deleted';
+    if (del.disabled) del.title = 'The last ' + what + ' can\'t be deleted';
     itemBar.appendChild(del);
   }
 
-  function showItemBar(node) {
+  function showItemBar(node, k) {
     clearTimeout(hideTimer);
-    if (active || node === current) return;
+    if (node === current) return;
+    // while a field is open, only its own paragraphs get the toolbar
+    if (active && !(k === 'block' && node.parentNode === active)) { if (current) hideItemBar(); return; }
     if (current) current.classList.remove('lou-item-on');
     current = node;
+    kind = k;
     current.classList.add('lou-item-on');
     fillItemBar(false);
     itemBar.hidden = false;
@@ -221,8 +300,10 @@
 
   function track(target) {
     if (itemBar.contains(target)) { clearTimeout(hideTimer); return; }
-    var node = target.closest && target.closest('[data-lou-item]');
-    if (node) showItemBar(node);
+    var block = blockOf(target);
+    var item = target.closest && target.closest('[data-lou-item]');
+    if (block && block.parentNode.children.length > 0) showItemBar(block, 'block');
+    else if (item) showItemBar(item, 'item');
     else if (current) { clearTimeout(hideTimer); hideTimer = setTimeout(hideItemBar, 300); }
   }
   document.addEventListener('mouseover', function (e) { track(e.target); });
@@ -233,11 +314,7 @@
   window.addEventListener('message', function (e) {
     if (e.origin !== origin || e.source !== window.parent || !e.data || e.data.lou !== 'flash') return;
     var node = document.querySelector('[data-lou-item="' + CSS.escape(String(e.data.item)) + '"]');
-    if (!node) return;
-    var r = node.getBoundingClientRect();
-    if (r.top < 0 || r.bottom > window.innerHeight) node.scrollIntoView({ block: 'center' });
-    node.classList.add('lou-flash');
-    setTimeout(function () { node.classList.remove('lou-flash'); }, 1600);
+    if (node) flash(node);
   });
 
   // ------------------------------------------------------------ restore unsaved typing after a reload
