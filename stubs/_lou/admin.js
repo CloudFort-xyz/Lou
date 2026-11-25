@@ -1,12 +1,85 @@
-/* Lou admin: confirmations, the mobile menu, and the parent side of the inline editor. */
+/* Lou admin: confirmations, busy buttons, copy buttons, local times, the mobile menu, and the parent side of the inline editor. */
 (function () {
   'use strict';
   var body = document.body;
   var csrf = body.dataset.csrf;
   var self = body.dataset.self;
 
-  document.querySelectorAll('form[data-confirm]').forEach(function (f) {
-    f.addEventListener('submit', function (e) { if (!window.confirm(f.dataset.confirm)) e.preventDefault(); });
+  // A confirm on a single button (forms with several actions, such as a redirect row).
+  document.querySelectorAll('button[data-confirm]').forEach(function (b) {
+    b.addEventListener('click', function (e) { if (!window.confirm(b.dataset.confirm)) e.preventDefault(); });
+  });
+
+  // Confirm, then mark the form busy: publishing, backups and updates take a few seconds, and a second
+  // click would send the request again. The button is disabled a tick later, after the browser has read
+  // its name/value into the request.
+  document.querySelectorAll('form').forEach(function (f) {
+    f.addEventListener('submit', function (e) {
+      if (f.dataset.confirm && !window.confirm(f.dataset.confirm)) { e.preventDefault(); return; }
+      if (e.defaultPrevented || f.method.toLowerCase() !== 'post' || f.hasAttribute('data-no-busy')) return;
+      var button = e.submitter || f.querySelector('button[type=submit]');
+      if (!button || button.disabled) return;
+      setTimeout(function () {
+        button.dataset.label = button.textContent;
+        button.textContent = 'Working…';
+        button.disabled = true;
+        f.setAttribute('aria-busy', 'true');
+      }, 0);
+    });
+  });
+  // Coming back with the browser's Back button can show the page as it was left: undo the busy state.
+  window.addEventListener('pageshow', function (e) {
+    if (!e.persisted) return;
+    document.querySelectorAll('button[data-label]').forEach(function (b) {
+      b.textContent = b.dataset.label; b.disabled = false; delete b.dataset.label;
+      b.form && b.form.removeAttribute('aria-busy');
+    });
+  });
+
+  // Copy buttons: data-copy="<id>" copies that element's value (inputs) or its text, exactly as shown.
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+    // Plain http (no Clipboard API): copy through a temporary, off-screen text area.
+    return new Promise(function (resolve, reject) {
+      var t = document.createElement('textarea');
+      t.value = text;
+      t.setAttribute('readonly', '');
+      t.className = 'sr';
+      body.appendChild(t);
+      t.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+      body.removeChild(t);
+      ok ? resolve() : reject(new Error('copy failed'));
+    });
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('[data-copy]') : null;
+    if (!b) return;
+    var src = document.getElementById(b.dataset.copy);
+    if (!src) return;
+    var label = b.dataset.copyLabel || b.textContent;
+    b.dataset.copyLabel = label;
+    copyText('value' in src && src.tagName !== 'BUTTON' ? src.value : src.textContent).then(function () {
+      b.textContent = 'Copied';
+      b.classList.add('is-done');
+    }, function () {
+      b.textContent = 'Press Ctrl+C';
+      if (src.select) src.select();
+    }).then(function () {
+      clearTimeout(b._t);
+      b._t = setTimeout(function () { b.textContent = label; b.classList.remove('is-done'); }, 1600);
+    });
+  });
+
+  // Times are rendered in UTC; show them in the browser's time zone (UTC stays in the tooltip).
+  var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+  document.querySelectorAll('time[datetime]').forEach(function (t) {
+    var d = new Date(t.getAttribute('datetime'));
+    if (isNaN(d.getTime())) return;
+    var day = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    t.title = t.textContent;
+    t.textContent = t.hasAttribute('data-date') ? day : day + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   });
 
   // small screens: the side menu opens from the top bar button
@@ -151,13 +224,19 @@
     try {
       path = new URL(frame.contentWindow.location.href).pathname.replace(/^\/_lou\/p\/[a-f0-9]{32}/, '') || '/';
     } catch (e) { /* ignore */ }
+    var box = document.getElementById('share-result');
+    var field = document.getElementById('share-url');
+    var note = document.getElementById('share-note');
+    note.textContent = 'Creating the link…';
     post('share', live ? { live: '1', path: path } : { days: 7 }).then(function (res) {
-      var out = document.getElementById('share-result');
       if (res.ok) {
-        out.textContent = res.url + (res.live ? ' (live, valid for a day)' : ' (valid for ' + res.days + ' days)');
-        if (navigator.clipboard) navigator.clipboard.writeText(res.url).then(function () { out.textContent += ', copied'; }, function () {});
+        field.value = res.url;
+        box.hidden = false;
+        var valid = res.live ? 'Live viewer link, valid for a day' : 'Preview link, valid for ' + res.days + ' days';
+        note.textContent = valid + '.';
+        copyText(res.url).then(function () { note.textContent = valid + ', copied to the clipboard.'; }, function () {});
       } else {
-        out.textContent = res.message || 'Failed';
+        note.textContent = res.message || 'Failed';
       }
     });
   }

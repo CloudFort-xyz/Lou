@@ -86,6 +86,7 @@ $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
     <?php if ($role === 'admin'): ?><form method="post" action="<?= $self ?>?r=rebuild" class="inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="btn" type="submit">Rebuild now</button></form>
     <?php else: ?>Ask an admin to rebuild it under Updates.<?php endif ?></div>
 <?php endif ?>
+<?php if (!empty($flash)): ?><div class="notice notice-ok" role="status"><?= $e($flash) ?></div><?php endif ?>
 <?= $content ?>
 </main>
 <script src="/_lou/admin.js" defer></script>

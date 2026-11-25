@@ -12,7 +12,7 @@ $who = static fn (string $owner): string => preg_replace('/^(user|llm):/', '', $
   <tbody>
   <?php foreach ($entries as $en): ?>
     <tr>
-      <td><a href="<?= $self ?>?r=history-entry&amp;id=<?= $e($en['id']) ?>"><?= $e(substr(str_replace('T', ' ', $en['at']), 0, 16)) ?> UTC</a><small class="muted">by <?= $e($en['by']) ?></small></td>
+      <td><a href="<?= $self ?>?r=history-entry&amp;id=<?= $e($en['id']) ?>"><?= $time($en['at']) ?></a><small class="muted">by <?= $e($en['by']) ?></small></td>
       <td><?php foreach ($en['submissions'] as $sub): ?><div><?= $sub['summary'] !== '' ? $e(mb_strimwidth($sub['summary'], 0, 120, '…')) : '<span class="muted">(no summary)</span>' ?> <small class="muted"><?= $e($who($sub['by'])) ?></small></div><?php endforeach ?></td>
       <td><?php foreach ($en['files'] as $path => $kind): ?><a href="<?= $self ?>?r=history&amp;file=<?= $e(rawurlencode($path)) ?>"><code><?= $e($path) ?></code></a><?= $kind !== 'modified' ? ' <small class="muted">' . $e($kind) . '</small>' : '' ?><br><?php endforeach ?></td>
     </tr>

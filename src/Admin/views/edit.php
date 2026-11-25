@@ -29,7 +29,11 @@
     <p><button class="btn btn-link" type="button" id="share">Create a shareable preview link</button><br>
       <button class="btn btn-link" type="button" id="share-live">Create a live viewer link</button>
       <small class="muted">The client sees your changes appear as you save them. Valid for a day.</small></p>
-    <p id="share-result" class="muted"></p>
+    <div id="share-result" class="copy-field" hidden>
+      <input class="code" id="share-url" readonly aria-label="Shareable link" data-select>
+      <button class="btn" type="button" data-copy="share-url">Copy</button>
+    </div>
+    <p id="share-note" class="muted" role="status" aria-live="polite"></p>
     <h2>How to edit</h2>
     <p class="muted">Click any highlighted text in the preview to edit it, then click outside to save. Click an image to replace it or change its description.</p>
   </aside>

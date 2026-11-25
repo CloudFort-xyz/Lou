@@ -4,7 +4,7 @@
 <section class="widget settings-section">
   <h2>Lou <?= $e($version) ?></h2>
   <?php if ($updated): ?>
-    <div class="alert alert-ok">Updated from <?= $e($updated['from']) ?> to <?= $e($updated['to']) ?> on <?= $e(substr((string) $updated['at'], 0, 16)) ?> UTC<?= empty($updated['signed']) ? ' (the zip was not signed)' : '' ?>.</div>
+    <div class="alert alert-ok">Updated from <?= $e($updated['from']) ?> to <?= $e($updated['to']) ?> on <?= $time((string) $updated['at']) ?><?= empty($updated['signed']) ? ' (the zip was not signed)' : '' ?>.</div>
   <?php endif ?>
   <?php if ($blocked): ?>
     <p><?= $e($blocked) ?></p>
@@ -21,7 +21,7 @@
           <button class="btn btn-primary" type="submit">Update to <?= $e($check['version']) ?></button>
         </form>
       <?php else: ?>
-        <p>You have the latest version (checked <?= $e(substr((string) $check['checked'], 0, 16)) ?> UTC).</p>
+        <p>You have the latest version (checked <?= $time((string) $check['checked']) ?>).</p>
       <?php endif ?>
     <?php endif ?>
     <form method="post" action="<?= $self ?>?r=update-check" class="inline">

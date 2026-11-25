@@ -232,14 +232,21 @@ test('bridge: REST fallback and OpenAPI', function () {
 test('bridge: assistants screen creates a token once and revokes it; live build ships mcp.php', function () {
     [$admin, , $app] = admin_setup();
     $r = $admin->handle(admin_req('POST', 'token-add', ['name' => 'Claude – Bence'], ['headers' => ['accept' => 'text/html']]));
+    check($r->status === 303 && str_ends_with($r->headers['Location'], '?r=assistants'), 'post/redirect/get, so a reload does not create a second token');
+    $r = $admin->handle(admin_req('GET', 'assistants', [], ['headers' => ['accept' => 'text/html']]));
     check(preg_match('/lou_[a-f0-9]{48}/', $r->body, $m) === 1, 'token shown');
+    contains($r->body, 'data-copy="new-token"');
+    check(substr_count($r->body, $m[0]) >= 5, 'the snippets contain the new token');
     check((new Tokens($app->varDir . '/tokens.json'))->verify($m[0]) === 'Claude – Bence', 'token works');
     check(!str_contains((string) file_get_contents($app->varDir . '/tokens.json'), $m[0]), 'only the hash is stored');
     $page = $admin->handle(admin_req('GET', 'assistants', [], ['headers' => ['accept' => 'text/html']]))->body;
     check(!str_contains($page, $m[0]), 'token not shown again');
     contains($page, 'claude mcp add');
+    contains($page, 'lou_YOUR_TOKEN');
+    check(substr_count($page, 'data-copy="snip-') === 5, 'every snippet has a copy button');
     $id = array_key_first((new Tokens($app->varDir . '/tokens.json'))->all());
     $admin->handle(admin_req('POST', 'token-revoke', ['id' => $id]));
+    contains($admin->handle(admin_req('GET', 'assistants', [], ['headers' => ['accept' => 'text/html']]))->body, 'The token was revoked');
     check((new Tokens($app->varDir . '/tokens.json'))->verify($m[0]) === null, 'revoked');
 
     [$editor] = admin_setup('editor');

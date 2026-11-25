@@ -10,12 +10,12 @@
 </p>
 <?php if (!$rows): ?><p class="muted">No submissions yet.</p><?php else: ?>
 <table class="table list">
-  <thead><tr><th>#</th><th>Date (UTC)</th><th>Form</th><th>From</th><th>Status</th></tr></thead>
+  <thead><tr><th>#</th><th>Date</th><th>Form</th><th>From</th><th>Status</th></tr></thead>
   <tbody>
   <?php foreach ($rows as $r): $d = json_decode($r['data'], true) ?: []; ?>
     <tr>
       <td><a href="<?= $self ?>?r=submission&amp;id=<?= (int) $r['id'] ?>"><?= (int) $r['id'] ?></a></td>
-      <td><?= $e(substr(str_replace('T', ' ', $r['created_at']), 0, 16)) ?></td>
+      <td><?= $time($r['created_at']) ?></td>
       <td><?= $e($r['form']) ?> <small class="muted"><?= $e($r['lang']) ?></small></td>
       <td><?= $e($d['name'] ?? '') ?> <small class="muted"><?= $e($d['email'] ?? '') ?></small></td>
       <td><span class="badge<?= $r['status'] === 'ok' ? '' : ' badge-warn' ?>"><?= $e($r['status']) ?></span></td>

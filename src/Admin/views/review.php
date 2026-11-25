@@ -48,7 +48,7 @@ $who = static fn (string $owner): string => preg_replace('/^llm:/', '', preg_rep
     <h3>Submitted</h3>
     <ul class="submissions">
       <?php foreach ($meta['submissions'] as $sub): ?>
-        <li><strong><?= $e($who($sub['by'])) ?></strong>, <?= $e(substr(str_replace('T', ' ', $sub['at']), 0, 16)) ?> UTC
+        <li><strong><?= $e($who($sub['by'])) ?></strong>, <?= $time($sub['at']) ?>
           <?php if ($sub['summary'] !== ''): ?><blockquote class="pre"><?= $e($sub['summary']) ?></blockquote><?php endif ?>
           <small class="muted"><?= $e(implode(', ', $sub['files'])) ?></small></li>
       <?php endforeach ?>

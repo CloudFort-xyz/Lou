@@ -3,7 +3,7 @@
 <h1>Submission #<?= (int) $row['id'] ?></h1>
 <dl class="dl">
   <dt>Form</dt><dd><?= $e($row['form']) ?> (<?= $e($row['lang']) ?>)</dd>
-  <dt>Date (UTC)</dt><dd><?= $e($row['created_at']) ?></dd>
+  <dt>Date</dt><dd><?= $time($row['created_at']) ?></dd>
   <?php foreach ($d as $k => $v): ?>
     <dt><?= $e($k) ?></dt><dd class="pre"><?= $e($v) ?></dd>
   <?php endforeach ?>

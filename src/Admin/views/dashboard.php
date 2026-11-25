@@ -1,7 +1,6 @@
 <?php
 /** @var callable $e */
 $who = static fn (string $owner): string => preg_replace('/^(user|llm):/', '', $owner) . (str_starts_with($owner, 'llm:') ? ' (assistant)' : '');
-$when = static fn (string $iso): string => substr(str_replace('T', ' ', $iso), 0, 16);
 ?>
 <div class="page-head">
   <h1>Dashboard</h1>
@@ -17,7 +16,7 @@ $when = static fn (string $iso): string => substr(str_replace('T', ' ', $iso), 0
         <small class="muted"><?= (int) $recentCount ?> in the last 7 days</small></li>
       <li><a href="<?= $self ?>?r=subscribers"><strong><?= (int) $subscribers ?></strong> newsletter subscriber<?= $subscribers === 1 ? '' : 's' ?></a></li>
     </ul>
-    <p class="muted"><?php if ($live): ?>Live build published <?= $e($when($live['at'])) ?> UTC.<?php else: ?>The live site has not been published from the admin yet.<?php endif ?></p>
+    <p class="muted"><?php if ($live): ?>Live build published <?= $time($live['at']) ?>.<?php else: ?>The live site has not been published from the admin yet.<?php endif ?></p>
   </section>
 
   <section class="widget">
@@ -44,7 +43,7 @@ $when = static fn (string $iso): string => substr(str_replace('T', ' ', $iso), 0
       <ul class="feed">
         <?php foreach ($latest as $r): $d = json_decode($r['data'], true) ?: []; ?>
           <li><a href="<?= $self ?>?r=submission&amp;id=<?= (int) $r['id'] ?>"><?= $e(($d['name'] ?? '') !== '' ? $d['name'] : ($d['email'] ?? '#' . $r['id'])) ?></a>
-            <small class="muted"><?= $e($r['form']) ?> · <?= $e($when($r['created_at'])) ?></small>
+            <small class="muted"><?= $e($r['form']) ?> · <?= $time($r['created_at']) ?></small>
             <?php if ($r['status'] !== 'ok'): ?><span class="badge badge-warn"><?= $e($r['status']) ?></span><?php endif ?></li>
         <?php endforeach ?>
       </ul>
@@ -60,7 +59,7 @@ $when = static fn (string $iso): string => substr(str_replace('T', ' ', $iso), 0
       <ul class="feed">
         <?php foreach ($history as $h): $first = $h['submissions'][0] ?? null; ?>
           <li><a href="<?= $self ?>?r=history-entry&amp;id=<?= $e($h['id']) ?>"><?= $first && $first['summary'] !== '' ? $e(mb_strimwidth($first['summary'], 0, 80, '…')) : count($h['files']) . ' changed file' . (count($h['files']) === 1 ? '' : 's') ?></a>
-            <small class="muted"><?= $e($when($h['at'])) ?> by <?= $e($h['by']) ?><?= $first && $who($first['by']) !== $h['by'] ? ', from ' . $e($who($first['by'])) : '' ?></small></li>
+            <small class="muted"><?= $time($h['at']) ?> by <?= $e($h['by']) ?><?= $first && $who($first['by']) !== $h['by'] ? ', from ' . $e($who($first['by'])) : '' ?></small></li>
         <?php endforeach ?>
       </ul>
       <p><a href="<?= $self ?>?r=history">Full history</a></p>

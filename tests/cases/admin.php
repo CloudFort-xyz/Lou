@@ -408,3 +408,32 @@ test('admin: repeatable pages (admin.repeatable) can be duplicated and deleted t
     check(is_dir("$site/content/pages/job-a-2") && !is_dir("$site/content/pages/job-a"), 'published: copy added, original deleted');
     check(is_file($app->outputDir() . '/rolunk/allas-2/index.html'), 'copy is live');
 });
+
+test('admin: actions that redirect leave a one-time notice on the next page', function () {
+    [$admin] = admin_setup();
+    $html = ['headers' => ['accept' => 'text/html']];
+    $r = $admin->handle(admin_req('POST', 'backup', [], $html));
+    check($r->status === 303, 'backup redirects');
+    $page = $admin->handle(admin_req('GET', 'backups', [], $html))->body;
+    contains($page, 'class="notice notice-ok" role="status">Backup created: lou-backup-');
+    contains($page, '<th>Created</th>');
+    check(!str_contains($admin->handle(admin_req('GET', 'backups', [], $html))->body, 'Backup created'), 'shown only once');
+
+    $admin->handle(admin_req('POST', 'redirect', ['from' => '/regi/', 'action' => 'page', 'target' => 'contact|hu']));
+    $page = $admin->handle(admin_req('GET', 'redirects', [], $html))->body;
+    contains($page, 'Redirect from /regi/ saved.');
+    contains($page, 'value="contact|hu" selected', 'the row shows its current target');
+    contains($page, 'data-confirm="Delete the redirect from /regi/?');
+    $admin->handle(admin_req('POST', 'redirect', ['from' => '/regi/', 'action' => 'delete']));
+    $page = $admin->handle(admin_req('GET', 'redirects', [], $html))->body;
+    contains($page, 'Redirect from /regi/ deleted.');
+    contains($page, 'No redirects yet.');
+});
+
+test('admin: times are rendered as <time> in UTC for admin.js to localise', function () {
+    check(AdminApp::stamp('2026-11-25T19:46:38+00:00') === '<time datetime="2026-11-25T19:46:38Z">2026-11-25 19:46 UTC</time>', AdminApp::stamp('2026-11-25T19:46:38+00:00'));
+    check(AdminApp::stamp('2026-11-25 19:46:38') === '<time datetime="2026-11-25T19:46:38Z">2026-11-25 19:46 UTC</time>', 'SQLite format is UTC');
+    check(AdminApp::stamp('2026-11-25T20:46:38+01:00', true) === '<time datetime="2026-11-25T19:46:38Z" data-date>2026-11-25</time>', 'offsets are converted');
+    check(AdminApp::stamp(0) === '<time datetime="1970-01-01T00:00:00Z">1970-01-01 00:00 UTC</time>', 'Unix time');
+    check(AdminApp::stamp('not a date <b>') === 'not a date &lt;b&gt;' && AdminApp::stamp(null) === '', 'bad input is escaped');
+});

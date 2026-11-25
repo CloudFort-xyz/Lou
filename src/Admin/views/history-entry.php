@@ -3,7 +3,7 @@
 $who = static fn (string $owner): string => preg_replace('/^(user|llm):/', '', $owner) . (str_starts_with($owner, 'llm:') ? ' (assistant)' : '');
 ?>
 <p><a href="<?= $self ?>?r=history">← History</a></p>
-<h1>Published <?= $e(substr(str_replace('T', ' ', $entry['at']), 0, 16)) ?> UTC</h1>
+<h1>Published <?= $time($entry['at']) ?></h1>
 <p>by <?= $e($entry['by']) ?></p>
 <?php foreach ($entry['submissions'] as $sub): ?>
   <blockquote class="pre"><?= $sub['summary'] !== '' ? $e($sub['summary']) : '(no summary)' ?> <small class="muted">— <?= $e($who($sub['by'])) ?></small></blockquote>
