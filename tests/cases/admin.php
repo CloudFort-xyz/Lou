@@ -448,3 +448,19 @@ test('admin: long or rarely used sections are native <details> accordions', func
     contains($get('updates'), '<details class="fold" id="design">');
     contains($get('edit'), '<details class="fold fold-panel" open><summary><h2>Page settings</h2>');
 });
+
+test('admin: backups can be deleted (admins only, only real backup files)', function () {
+    [$admin, , $app] = admin_setup();
+    $html = ['headers' => ['accept' => 'text/html']];
+    $admin->handle(admin_req('POST', 'backup', [], $html));
+    $file = basename(glob($app->varDir . '/backups/*.zip')[0]);
+    $page = $admin->handle(admin_req('GET', 'backups', [], $html))->body;
+    contains($page, 'data-confirm="Delete the backup ' . $file . ' permanently?');
+    check($admin->handle(admin_req('POST', 'backup-delete', ['file' => '../users.json']))->status === 422, 'no path tricks');
+    check($admin->handle(admin_req('POST', 'backup-delete', ['file' => 'nope.zip']))->status === 422, 'unknown file');
+    [$editor] = admin_setup('editor');
+    check($editor->handle(admin_req('POST', 'backup-delete', ['file' => $file], $html))->status === 403, 'editors cannot delete');
+    check($admin->handle(admin_req('POST', 'backup-delete', ['file' => $file], $html))->status === 303, 'deleted');
+    check(!is_file($app->varDir . "/backups/$file") && is_file($app->varDir . '/users.json'), 'only the backup is gone');
+    contains($admin->handle(admin_req('GET', 'backups', [], $html))->body, "Backup $file deleted.");
+});

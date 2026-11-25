@@ -70,6 +70,7 @@ final class AdminApp
         'GET backups'         => 'admin',
         'POST backup'         => 'admin',
         'GET download'        => 'admin',
+        'POST backup-delete'  => 'admin',
         'POST restore'        => 'admin',
         'GET redirects'       => 'admin',
         'POST redirect'       => 'admin',
@@ -826,6 +827,20 @@ final class AdminApp
         return new Response(200, (string) file_get_contents($path), [
             'Content-Type' => 'application/zip', 'Content-Disposition' => "attachment; filename=\"$name\"",
         ]);
+    }
+
+    private function rPostBackupDelete(): Response
+    {
+        $name = basename($this->req->input('file'));
+        $path = $this->app->varDir . "/backups/$name";
+        if (!preg_match('/^[a-z0-9._-]+\.zip$/i', $name) || !is_file($path)) {
+            throw new LouException('Unknown backup');
+        }
+        if (!unlink($path)) {
+            throw new LouException("Could not delete $name. Check the file permissions of var/backups.");
+        }
+        $this->db->audit('admin', 'backup-delete', $name, $this->user());
+        return $this->done('backups', "Backup $name deleted.");
     }
 
     private function rPostRestore(): Response
