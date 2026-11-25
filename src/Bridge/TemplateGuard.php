@@ -68,6 +68,11 @@ final class TemplateGuard
                 $bad('variable variables');
             } elseif ($t->is(T_VARIABLE) && $next?->text === '(') {
                 $bad('calling a variable as a function');
+            } elseif ($t->text === '(' && $prev !== null && self::callsAValue($prev)) {
+                // 'system'(), ('sys' . 'tem')(), $a[0](), "{$f}"(), $v->field('f')(): a call whose callee is a value
+                $bad('calling a string, array element or expression as a function');
+            } elseif ($t->is(T_ELLIPSIS) && $prev?->text === '(' && $next?->text === ')') {
+                $bad('first-class callables (...)');
             } elseif ($t->is([T_STRING, T_NAME_FULLY_QUALIFIED, T_NAME_QUALIFIED]) && $next?->text === '('
                 && !($prev !== null && $prev->is([T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR]))) {
                 $name = strtolower(ltrim($t->text, '\\'));
@@ -87,6 +92,16 @@ final class TemplateGuard
             }
         }
         return array_values(array_unique($problems));
+    }
+
+    /**
+     * Whether a "(" right after $prev would call the value $prev ends (a string, an array element, the result of
+     * an expression or call) rather than open a group or a named call. Named calls are checked by name elsewhere.
+     */
+    private static function callsAValue(\PhpToken $prev): bool
+    {
+        return in_array($prev->text, [')', ']', '}', '"'], true)
+            || $prev->is([T_CONSTANT_ENCAPSED_STRING, T_END_HEREDOC, T_VARIABLE]);
     }
 
     /** Walk back over `->name`, `?->name`, `(...)` and `[...]` to find the chain's root variable. */
