@@ -244,3 +244,12 @@ test('admin: users need strong-enough passwords and valid roles', function () {
     $u->add('bence', 'long-enough-pw', 'admin');
     check($u->verify('BENCE', 'long-enough-pw') === 'admin' && $u->verify('bence', 'wrong') === null && $u->verify('nobody', 'x') === null, 'verify');
 });
+
+test('admin: web server policy for admin.php matches the admin policy, so previews can be framed', function () {
+    $root = install();
+    (new Builder(new App($root)))->build();
+    $htaccess = file_get_contents("$root/public/_lou/.htaccess");
+    contains($htaccess, '<Files "admin.php">');
+    contains($htaccess, 'Header always set Content-Security-Policy "' . AdminApp::CSP . '"');
+    contains(AdminApp::CSP, "frame-src 'self'");
+});
