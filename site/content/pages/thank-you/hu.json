@@ -1,0 +1,7 @@
+{
+  "slug": "koszonjuk",
+  "title": "Köszönjük!",
+  "template": "page",
+  "sitemap": false,
+  "fields": { "hero": { "title": "Köszönjük!", "text": "Üzenetét megkaptuk, hamarosan válaszolunk." } }
+}

@@ -71,6 +71,10 @@ final class Builder
                 Fs::copyDir($this->app->siteDir . '/assets', $tmp . '/assets');
             }
             Fs::copyDir($this->app->stubsDir, $tmp);
+            foreach (glob($tmp . '/_lou/*.php') ?: [] as $stub) {
+                // endpoint stubs require Lou core from outside the web root
+                Fs::write($stub, str_replace('__LOU_ROOT__', var_export($this->app->root, true), (string) file_get_contents($stub)));
+            }
             $this->writeHtaccess($tmp, $site, $rules, $live);
             foreach ($rules as $r) {
                 $target = $tmp . rtrim($r['from'], '/') . '/index.html';

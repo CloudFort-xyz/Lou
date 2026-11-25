@@ -6,6 +6,10 @@ declare(strict_types=1);
 use Lou\App;
 use Lou\Backup\Backup;
 use Lou\Build\Builder;
+use Lou\Db\Database;
+use Lou\Env;
+use Lou\Forms\FormProcessor;
+use Lou\Integrations;
 use Lou\LouException;
 use Lou\View;
 
@@ -33,6 +37,11 @@ function lou_args(array $argv): array
         }
     }
     return [$pos, $opt];
+}
+
+function lou_forms(App $app): FormProcessor
+{
+    return new FormProcessor($app, new Database($app->databaseFile()), new Integrations($app, Env::load($app)));
 }
 
 function lou_report_build(array $r): void
@@ -83,6 +92,30 @@ try {
             lou_report_build((new Builder(new App($root)))->build());
             break;
 
+        case 'retry':
+            $r = lou_forms($app)->retry();
+            echo "Retried {$r['retried']} partial submissions, {$r['fixed']} now complete\n";
+            break;
+
+        case 'submissions':
+            $db = new Database($app->databaseFile());
+            $where = isset($opt['form']) && is_string($opt['form']) ? ' WHERE form = ' . $db->pdo->quote($opt['form']) : '';
+            $rows = $db->run("SELECT id, form, lang, status, created_at, data FROM submissions$where ORDER BY id")->fetchAll();
+            $out = fopen('php://output', 'w');
+            $keys = [];
+            foreach ($rows as $r) {
+                $keys += array_flip(array_keys(json_decode($r['data'], true) ?: []));
+            }
+            $keys = array_keys($keys);
+            fputcsv($out, ['id', 'form', 'lang', 'status', 'created_at', ...$keys]);
+            foreach ($rows as $r) {
+                $d = json_decode($r['data'], true) ?: [];
+                // neutralise spreadsheet formulas (CSV injection)
+                $cell = fn ($k) => preg_match('/^[=+\-@\t\r]/', (string) ($d[$k] ?? '')) ? "'" . $d[$k] : (string) ($d[$k] ?? '');
+                fputcsv($out, [$r['id'], $r['form'], $r['lang'], $r['status'], $r['created_at'], ...array_map($cell, $keys)]);
+            }
+            break;
+
         case 'version':
             echo 'Lou ' . App::VERSION . "\n";
             break;
@@ -101,6 +134,8 @@ try {
                                               (--password encrypts it and includes .env.php)
               restore FILE [--password=PW] [--no-db]
                                               Restore a backup (current state is backed up first), then rebuild
+              retry                           Re-run failed actions (email, newsletter, webhook) of stored submissions
+              submissions [--form=ID]         Export submissions as CSV to stdout
               version                         Show the version
 
             Global: --root=DIR to run against another install.
