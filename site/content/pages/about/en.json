@@ -1,0 +1,11 @@
+{
+  "slug": "about-us",
+  "title": "About us",
+  "menu_label": "About",
+  "description": "Meet our team.",
+  "template": "page",
+  "fields": {
+    "hero": { "title": "About us", "text": "Twenty years in the business." },
+    "body": "<p><strong>Example Ltd.</strong> has helped clients since 2005.</p>"
+  }
+}

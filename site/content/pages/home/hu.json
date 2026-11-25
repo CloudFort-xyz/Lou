@@ -1,0 +1,18 @@
+{
+  "title": "Példa Kft. – Megbízható megoldások",
+  "menu_label": "Főoldal",
+  "description": "A Példa Kft. bemutatkozó oldala.",
+  "template": "home",
+  "fields": {
+    "hero": {
+      "title": "Egyszerű, gyors, biztonságos",
+      "text": "Statikus oldalak, amelyek egyszerűen működnek.",
+      "image": { "src": "/assets/img/hero.svg", "alt": "Absztrakt illusztráció", "width": 1200, "height": 600 }
+    },
+    "features": [
+      { "title": "Gyors", "text": "Előre generált HTML, nincs adatbázis-lekérdezés." },
+      { "title": "Biztonságos", "text": "Minimális szerveroldali kód." },
+      { "title": "Kényelmes", "text": "A tartalom a böngészőben szerkeszthető." }
+    ]
+  }
+}

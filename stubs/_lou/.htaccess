@@ -1,0 +1,8 @@
+# Only Lou's own endpoint stubs may run. Each one just requires Lou core from outside the web root.
+<FilesMatch "^[a-z\-]+\.php$">
+    Require all granted
+</FilesMatch>
+<IfModule mod_headers.c>
+    Header always set Cache-Control "no-store"
+    Header always set X-Robots-Tag "noindex, nofollow"
+</IfModule>

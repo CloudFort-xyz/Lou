@@ -1,0 +1,25 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: zip, pdo_sqlite, dom, intl, mbstring
+          coverage: none
+      - name: Lint
+        run: find src site tests lou -name '*.php' -o -name lou -type f | xargs -n1 php -l
+      - name: Tests
+        run: php tests/run.php
+      - name: Build example site
+        run: php lou build

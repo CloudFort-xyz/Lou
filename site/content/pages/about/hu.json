@@ -1,0 +1,10 @@
+{
+  "slug": "rolunk",
+  "title": "Rólunk",
+  "description": "Ismerje meg csapatunkat.",
+  "template": "page",
+  "fields": {
+    "hero": { "title": "Rólunk", "text": "Húsz éve a szakmában." },
+    "body": "<p>A <strong>Példa Kft.</strong> 2005 óta segít ügyfeleinek.</p><p>Árvíztűrő tükörfúrógép.</p>"
+  }
+}

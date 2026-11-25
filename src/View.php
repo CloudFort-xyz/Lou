@@ -1,0 +1,305 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Lou;
+
+use Lou\Content\Page;
+use Lou\Content\Site;
+use Lou\Support\Arr;
+use Lou\Support\Html;
+
+/**
+ * The $v helper available in every template. Output helpers escape by default.
+ *
+ * Templates run only at build time. Nothing here is executed per request.
+ */
+final class View
+{
+    public const MODE_LIVE = 'live';
+    public const MODE_PREVIEW = 'preview';
+
+    private ?string $layout = null;
+    private string $content = '';
+    /** @var array<string, string> */
+    private array $assetHashes = [];
+
+    public function __construct(
+        public readonly Site $site,
+        public readonly Page $page,
+        public readonly string $mode = self::MODE_LIVE,
+    ) {
+    }
+
+    // ------------------------------------------------------------ rendering
+
+    public function render(): string
+    {
+        $html = $this->renderFile($this->page->template, []);
+        // a template may call $v->layout('x'); layouts may themselves use a layout
+        $guard = 0;
+        while ($this->layout !== null) {
+            if (++$guard > 5) {
+                throw new LouException('Layout nesting too deep');
+            }
+            $name = $this->layout;
+            $this->layout = null;
+            $this->content = $html;
+            $html = $this->renderFile($name, []);
+        }
+        return $html;
+    }
+
+    /** Wrap this template's output in the named layout. */
+    public function layout(string $name): void
+    {
+        $this->layout = $name;
+    }
+
+    /** The wrapped template's output, for use inside a layout. */
+    public function content(): string
+    {
+        return $this->content;
+    }
+
+    /** @param array<string, mixed> $vars available in the partial as variables */
+    public function partial(string $name, array $vars = []): string
+    {
+        return $this->renderFile('partials/' . $name, $vars);
+    }
+
+    private function renderFile(string $name, array $vars): string
+    {
+        if (!preg_match('#^[a-z0-9_\-]+(/[a-z0-9_\-]+)?$#', $name)) {
+            throw new LouException("Invalid template name '$name'");
+        }
+        $file = $this->site->app->siteDir . "/templates/$name.php";
+        if (!is_file($file)) {
+            throw new LouException("Template not found: templates/$name.php");
+        }
+        $v = $this;
+        $render = static function (string $__file, array $__vars) use ($v): string {
+            extract($__vars, EXTR_SKIP);
+            ob_start();
+            try {
+                require $__file;
+                return (string) ob_get_contents();
+            } finally {
+                ob_end_clean();
+            }
+        };
+        return $render($file, $vars);
+    }
+
+    // ------------------------------------------------------------ page fields
+
+    /** Raw field value (no escaping). Use for logic, not for output. */
+    public function field(string $path, mixed $default = null): mixed
+    {
+        return Arr::get($this->page->fields, $path, $default);
+    }
+
+    public function has(string $path): bool
+    {
+        $v = $this->field($path);
+        return $v !== null && $v !== '' && $v !== [];
+    }
+
+    /** Escaped plain text. */
+    public function text(string $path, string $default = ''): string
+    {
+        $v = $this->field($path, $default);
+        return Html::escape(is_scalar($v) ? (string) $v : $default);
+    }
+
+    /** Sanitised rich text (allow-listed tags only). */
+    public function html(string $path): string
+    {
+        $v = $this->field($path, '');
+        return Html::sanitise(is_string($v) ? $v : '');
+    }
+
+    /** Unescaped output. Avoid. Flagged in reviews of LLM changes. */
+    public function raw(string $path): string
+    {
+        $v = $this->field($path, '');
+        return is_scalar($v) ? (string) $v : '';
+    }
+
+    /** Marks an element as inline-editable. Prints nothing in live builds. */
+    public function editable(string $path): string
+    {
+        return $this->mode === self::MODE_LIVE ? '' : ' data-lou-field="' . Html::escape($path) . '"';
+    }
+
+    /** <img> from an image field ({src, alt}). */
+    public function image(string $path, string $class = '', bool $lazy = true): string
+    {
+        $img = $this->field($path);
+        if (!is_array($img) || empty($img['src'])) {
+            return '';
+        }
+        $attrs = [
+            'src' => $this->assetUrl((string) $img['src']),
+            'alt' => (string) ($img['alt'] ?? ''),
+        ];
+        if (isset($img['width'], $img['height'])) {
+            $attrs['width'] = (string) (int) $img['width'];
+            $attrs['height'] = (string) (int) $img['height'];
+        }
+        if ($class !== '') {
+            $attrs['class'] = $class;
+        }
+        if ($lazy) {
+            $attrs['loading'] = 'lazy';
+            $attrs['decoding'] = 'async';
+        }
+        $out = '<img';
+        foreach ($attrs as $k => $val) {
+            $out .= ' ' . $k . '="' . Html::escape($val) . '"';
+        }
+        return $out . $this->editable($path) . '>';
+    }
+
+    // ------------------------------------------------------------ site-wide
+
+    public function lang(): string
+    {
+        return $this->page->lang;
+    }
+
+    public function title(): string
+    {
+        return Html::escape($this->page->title);
+    }
+
+    public function description(): string
+    {
+        return Html::escape($this->page->description);
+    }
+
+    /** Escape any string. */
+    public function e(mixed $s): string
+    {
+        return Html::escape((string) $s);
+    }
+
+    /** Global content for the current language (site/content/site/<lang>.json), escaped. */
+    public function global(string $path, string $default = ''): string
+    {
+        $v = Arr::get($this->site->globals($this->page->lang), $path, $default);
+        return Html::escape(is_scalar($v) ? (string) $v : $default);
+    }
+
+    /** UI string (site/content/strings/<lang>.json), escaped. {name} placeholders are replaced. */
+    public function t(string $key, array $replace = []): string
+    {
+        $s = $this->site->string($this->page->lang, $key) ?? $key;
+        foreach ($replace as $k => $val) {
+            $s = str_replace('{' . $k . '}', (string) $val, $s);
+        }
+        return Html::escape($s);
+    }
+
+    /** URL of a page by id, in the current (or given) language. Fails the build if it doesn't exist. */
+    public function url(string $pageId, ?string $lang = null): string
+    {
+        return Html::escape($this->site->url($pageId, $lang ?? $this->page->lang));
+    }
+
+    /** Absolute URL (needs base_url), for canonical/hreflang/og tags. */
+    public function absoluteUrl(string $pageId, ?string $lang = null): string
+    {
+        $base = rtrim((string) $this->site->app->config['base_url'], '/');
+        return Html::escape($base . $this->site->url($pageId, $lang ?? $this->page->lang));
+    }
+
+    /** URL of a file in site/assets with a content hash for cache busting. */
+    public function asset(string $path): string
+    {
+        return Html::escape($this->assetUrl('/assets/' . ltrim($path, '/')));
+    }
+
+    private function assetUrl(string $url): string
+    {
+        if (!str_starts_with($url, '/assets/')) {
+            return $url; // external or absolute URL
+        }
+        if (!isset($this->assetHashes[$url])) {
+            $file = $this->site->app->siteDir . $url;
+            $this->assetHashes[$url] = is_file($file) ? substr(md5_file($file) ?: '', 0, 8) : '';
+        }
+        return $this->assetHashes[$url] !== '' ? $url . '?v=' . $this->assetHashes[$url] : $url;
+    }
+
+    /**
+     * Menu items for the current language, with escaped label/url and an active flag.
+     * Pages that don't exist in this language are skipped.
+     *
+     * @return list<array{label: string, url: string, active: bool, children: list<array>}>
+     */
+    public function menu(): array
+    {
+        $build = function (array $items) use (&$build): array {
+            $out = [];
+            foreach ($items as $item) {
+                $page = $this->site->page($item['page'], $this->page->lang);
+                if ($page === null) {
+                    continue;
+                }
+                $out[] = [
+                    'label'    => Html::escape($page->menuLabel),
+                    'url'      => Html::escape($this->site->url($page->id, $page->lang)),
+                    'active'   => $page->id === $this->page->id,
+                    'children' => $build($item['children']),
+                ];
+            }
+            return $out;
+        };
+        return $build($this->site->menu());
+    }
+
+    /**
+     * This page in every language it exists in (for the language switcher and hreflang).
+     *
+     * @return list<array{lang: string, url: string, absolute: string, current: bool}>
+     */
+    public function alternates(): array
+    {
+        $base = rtrim((string) $this->site->app->config['base_url'], '/');
+        $out = [];
+        foreach ($this->site->languages() as $lang) {
+            if ($this->site->page($this->page->id, $lang) === null) {
+                continue;
+            }
+            $url = $this->site->url($this->page->id, $lang);
+            $out[] = [
+                'lang'     => $lang,
+                'url'      => Html::escape($url),
+                'absolute' => Html::escape($base . $url),
+                'current'  => $lang === $this->page->lang,
+            ];
+        }
+        return $out;
+    }
+
+    /** <link rel=canonical> + hreflang alternates (needs base_url). */
+    public function seoLinks(): string
+    {
+        if ($this->site->app->config['base_url'] === '' || $this->page->isSpecial()) {
+            return '';
+        }
+        $out = '<link rel="canonical" href="' . $this->absoluteUrl($this->page->id) . '">' . "\n";
+        $alts = $this->alternates();
+        if (count($alts) > 1) {
+            foreach ($alts as $a) {
+                $out .= '<link rel="alternate" hreflang="' . $a['lang'] . '" href="' . $a['absolute'] . '">' . "\n";
+            }
+            $def = $this->site->defaultLanguage();
+            if ($this->site->page($this->page->id, $def) !== null) {
+                $out .= '<link rel="alternate" hreflang="x-default" href="' . $this->absoluteUrl($this->page->id, $def) . '">' . "\n";
+            }
+        }
+        return $out;
+    }
+}

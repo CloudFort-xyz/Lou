@@ -1,0 +1,18 @@
+{
+  "title": "Example Ltd. – Reliable solutions",
+  "menu_label": "Home",
+  "description": "The website of Example Ltd.",
+  "template": "home",
+  "fields": {
+    "hero": {
+      "title": "Simple, fast & secure",
+      "text": "Static pages that just work.",
+      "image": { "src": "/assets/img/hero.svg", "alt": "Abstract illustration", "width": 1200, "height": 600 }
+    },
+    "features": [
+      { "title": "Fast", "text": "Pre-built HTML, no database queries." },
+      { "title": "Secure", "text": "Minimal server-side code." },
+      { "title": "Convenient", "text": "Content is edited right in the browser." }
+    ]
+  }
+}

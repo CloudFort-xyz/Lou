@@ -1,0 +1,11 @@
+{
+  "nav.label": "Főmenü",
+  "nav.languages": "Nyelvek",
+  "skip": "Ugrás a tartalomhoz",
+  "form.name": "Név",
+  "form.email": "E-mail",
+  "form.message": "Üzenet",
+  "form.consent": "Elfogadom az adatkezelési tájékoztatót",
+  "form.send": "Küldés",
+  "copyright": "© {year} {company}"
+}
