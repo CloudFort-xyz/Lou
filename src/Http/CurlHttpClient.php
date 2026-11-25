@@ -8,7 +8,8 @@ use Lou\LouException;
 
 final class CurlHttpClient implements HttpClient
 {
-    public function __construct(private readonly int $timeout = 10)
+    /** @param bool $followRedirects only to https:// (release downloads are redirected to a CDN) */
+    public function __construct(private readonly int $timeout = 10, private readonly bool $followRedirects = false)
     {
     }
 
@@ -28,8 +29,10 @@ final class CurlHttpClient implements HttpClient
             CURLOPT_HTTPHEADER     => $lines,
             CURLOPT_TIMEOUT        => $this->timeout,
             CURLOPT_CONNECTTIMEOUT => 5,
-            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_FOLLOWLOCATION => $this->followRedirects,
+            CURLOPT_MAXREDIRS      => 5,
             CURLOPT_PROTOCOLS      => CURLPROTO_HTTPS | CURLPROTO_HTTP,
+            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS,
             CURLOPT_USERAGENT      => 'Lou-CMS',
         ]);
         if ($body !== null) {

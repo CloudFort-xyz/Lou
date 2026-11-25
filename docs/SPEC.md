@@ -71,9 +71,13 @@ lou/                      ← repository / install root (NOT web-accessible)
 ```
 
 On KeyHelp (or any panel) the domain's document root points at `lou/public`.
-If a host can't change the document root, a fallback layout puts Lou in a
-sibling directory and builds into `public_html`, with `output_dir` set in
-config.
+If a host can't change the document root, Lou sits in a sibling directory
+and builds into `public_html` (`output_dir` set to it, `'output_swap' =>
+'contents'`): instead of renaming the whole folder, each build swaps in only
+the top-level entries Lou wrote last time (listed in `var/output.json`), so
+the host's own files stay. Foreign files a build must replace are moved to
+`var/replaced/<build>/`. Hosting-panel blocks (`# BEGIN … # END …`) in the
+document root's `.htaccess` are carried over to every build.
 
 ## 4. Content model
 
@@ -200,8 +204,20 @@ Image processing (resizing and WebP via GD) happens at upload time in the
 admin, not at build time, so builds stay fast.
 
 Deploy options:
-- **FTP/SSH upload** of the repo, then build on the server via the admin or
-  SSH.
+- **Release zip + web installer (primary, no Git).** `lou-<version>.zip`
+  (built by `php lou release`, published by the Release workflow for every
+  `v*` tag) holds the code, starter sites and `public/install.php`, never
+  `site/`, `var/` or `.env.php`. The installer checks requirements, asks for
+  a setup key from `var/install-key.txt` (proof of file access), seeds
+  `site/` from a starter or an uploaded zip (Lou backup, or any zip with a
+  site folder such as a GitHub download of a client repo), saves the site
+  address, output location and email, builds, and creates the first admin
+  last; it is locked once a user exists. Updates (Admin → Updates, `php lou
+  update`) download or accept a release zip, verify every file against
+  `release.json` and its Ed25519 signature (public key in
+  `src/Setup/release-key.pub`), swap in the code with the Deployer, and ask
+  for one rebuild (`var/live.json` records the Lou version of each build).
+  See `docs/install.md`.
 - **Git (optional):** the server's Git clone is kept separate from the live
   install. `php lou deploy DIR` copies the code (`src/`, `stubs/`,
   `vendor-bundled/`, `lou`) into the install, seeds `site/` only when the

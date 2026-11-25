@@ -30,6 +30,7 @@ final class Requirements
     private const RECOMMENDED = [
         'intl' => 'better slugs from accented text (falls back to iconv)',
         'exif' => 'auto-rotating phone photos on upload',
+        'sodium' => 'checking the signature of Lou updates',
     ];
 
     private readonly \Closure $hasExtension;
@@ -130,7 +131,11 @@ final class Requirements
         }
         $out = $app->outputDir();
         $parent = dirname($out);
-        if (is_link($out)) {
+        $contents = ($app->config['output_swap'] ?? 'rename') === 'contents';
+        if ($contents) {
+            $r[] = is_dir($out) && is_writable($out) ? $this->item(self::OK, 'output folder', "$out (Lou replaces only its own files there)")
+                : $this->item(self::FAIL, 'output folder', "$out must exist and be writable (output_swap is 'contents')");
+        } elseif (is_link($out)) {
             $r[] = $this->item(self::FAIL, 'output folder', "$out is a symlink. Point the symlink at it instead (public_html → $out), not the other way round, so the atomic swap works.");
         } elseif (!is_dir($parent) || !is_writable($parent)) {
             $r[] = $this->item(self::FAIL, 'output folder', "$parent must be writable, builds are swapped in by renaming next to $out");

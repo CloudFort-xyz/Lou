@@ -18,6 +18,7 @@ final class App
         'default_language' => 'en',
         'prefix_default'   => false,       // false: default language at /, others at /<lang>/
         'output_dir'       => 'public',    // relative to the install root, or absolute
+        'output_swap'      => 'rename',    // 'contents' for a document root Lou can't rename (see Build\Output)
         'keep_builds'      => 5,
     ];
 
@@ -52,8 +53,11 @@ final class App
         $this->config = $config;
     }
 
-    /** Install settings changed in the admin (var/settings.json). They override site/config.php. */
-    public const SETTINGS = ['base_url', 'mail'];
+    /**
+     * Install settings (var/settings.json), changed in the admin or written by the installer.
+     * They belong to this server, not to the site, so they override site/config.php.
+     */
+    public const SETTINGS = ['base_url', 'mail', 'output_dir', 'output_swap'];
 
     /** The mail keys the admin may set (mail.transport, mail.from, mail.from_name). */
     public const MAIL_SETTINGS = ['transport', 'from', 'from_name'];
@@ -68,6 +72,21 @@ final class App
             $data['mail'] = array_intersect_key((array) $data['mail'], array_flip(self::MAIL_SETTINGS));
         }
         return $data;
+    }
+
+    /**
+     * Checks and normalises a site address typed by a person: https://www.example.hu, no path.
+     * @throws LouException
+     */
+    public static function normalizeBaseUrl(string $url): string
+    {
+        $url = rtrim(trim($url), '/');
+        $p = parse_url($url);
+        if (!$p || !in_array($p['scheme'] ?? '', ['http', 'https'], true) || empty($p['host'])
+            || isset($p['user']) || isset($p['query']) || isset($p['fragment']) || ($p['path'] ?? '') !== '') {
+            throw new LouException('The site address must look like https://www.example.hu (no path)');
+        }
+        return strtolower($p['scheme'] . '://' . $p['host']) . (isset($p['port']) ? ':' . $p['port'] : '');
     }
 
     /** True when base_url is set to something other than the example placeholder (example.com/.org/.net). */

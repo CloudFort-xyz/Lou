@@ -7,10 +7,12 @@ namespace Lou\Admin;
 use Lou\App;
 use Lou\Env;
 use Lou\Integrations;
+use Lou\Mail\MailSettings;
 use Lou\Mail\Message;
 use Lou\Backup\Backup;
 use Lou\Bridge\Tokens;
 use Lou\Build\Builder;
+use Lou\Build\Output;
 use Lou\Content\ContentStore;
 use Lou\Content\History;
 use Lou\Content\Page;
@@ -20,6 +22,7 @@ use Lou\Db\Database;
 use Lou\Http\Request;
 use Lou\Http\Response;
 use Lou\LouException;
+use Lou\Setup\Updater;
 use Lou\Support\Fs;
 use Lou\Support\Git;
 use Lou\Support\Html;
@@ -83,10 +86,16 @@ final class AdminApp
         'POST settings'       => 'admin',
         'POST mail-settings'  => 'admin',
         'POST mail-test'      => 'admin',
+        'GET updates'         => 'admin',
+        'POST update-check'   => 'admin',
+        'POST update'         => 'admin',
+        'POST update-upload'  => 'admin',
+        'POST rebuild'        => 'admin',
     ];
 
     private Request $req;
     private ?Integrations $integrations = null;
+    private ?Updater $updater = null;
 
     public function __construct(
         private readonly App $app,
@@ -580,49 +589,14 @@ final class AdminApp
     /** Mail sender (var/settings.json) and SMTP server (var/secrets.json, 0600). An empty password keeps the stored one. */
     private function rPostMailSettings(): Response
     {
-        $transport = $this->req->input('transport');
-        if (!in_array($transport, ['smtp', 'log'], true)) {
-            throw new LouException('Choose how emails are sent');
+        $in = MailSettings::fromInput(fn (string $k): string => $this->req->input($k), (array) Env::load($this->app)->get('smtp', []));
+        if ($in['smtp'] !== null) {
+            Env::storeAdminSecret($this->app, 'smtp', $in['smtp']);
         }
-        $from = trim($this->req->input('from'));
-        if (!filter_var($from, FILTER_VALIDATE_EMAIL)) {
-            throw new LouException('The sender address must be a valid email address');
-        }
-        $fromName = trim(preg_replace('/[\x00-\x1F\x7F]+/', ' ', $this->req->input('from_name')));
-        if (mb_strlen($fromName) > 100) {
-            throw new LouException('The sender name is too long (100 characters at most)');
-        }
-
-        $host = strtolower(trim($this->req->input('host')));
-        if ($host !== '' || $transport === 'smtp') {
-            if (!preg_match('/^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/', $host)) {
-                throw new LouException('The SMTP server must be a host name like mail.example.hu');
-            }
-            $port = (int) $this->req->input('port');
-            if ($port < 1 || $port > 65535) {
-                throw new LouException('The SMTP port must be a number between 1 and 65535');
-            }
-            $secure = $this->req->input('secure');
-            if (!in_array($secure, ['tls', 'ssl', ''], true)) {
-                throw new LouException('Unknown encryption setting');
-            }
-            $user = trim($this->req->input('user'));
-            if (mb_strlen($user) > 200 || preg_match('/[\x00-\x1F\x7F]/', $user)) {
-                throw new LouException('The SMTP user name is not valid');
-            }
-            $current = (array) Env::load($this->app)->get('smtp', []);
-            $pass = $this->req->input('pass');
-            if ($pass === '' && $this->req->input('clear_pass') !== '1') {
-                $pass = (string) ($current['pass'] ?? '');
-            }
-            if (strlen($pass) > 500) {
-                throw new LouException('The SMTP password is too long');
-            }
-            Env::storeAdminSecret($this->app, 'smtp', ['host' => $host, 'port' => $port, 'user' => $user, 'pass' => $pass, 'secure' => $secure]);
-        }
-
+        $transport = $in['mail']['transport'];
+        $host = $in['smtp']['host'] ?? '';
         $settings = $this->app->settings();
-        $settings['mail'] = ['transport' => $transport, 'from' => $from, 'from_name' => $fromName];
+        $settings['mail'] = $in['mail'];
         Fs::writeJson($this->app->varDir . '/settings.json', $settings);
         $this->db->audit('admin', 'settings', "mail $transport" . ($host !== '' ? " via $host" : ''), $this->user());
         return Response::redirect(self::SELF . '?r=settings&mail-saved=1');
@@ -659,21 +633,88 @@ final class AdminApp
 
     private function rPostSettings(): Response
     {
-        $url = rtrim(trim($this->req->input('base_url')), '/');
-        $p = parse_url($url);
-        if (!$p || !in_array($p['scheme'] ?? '', ['http', 'https'], true) || empty($p['host'])
-            || isset($p['user']) || isset($p['query']) || isset($p['fragment']) || ($p['path'] ?? '') !== '') {
-            throw new LouException('The site address must look like https://www.example.hu (no path)');
-        }
         $file = $this->app->varDir . '/settings.json';
         $settings = $this->app->settings();
-        $settings['base_url'] = strtolower($p['scheme'] . '://' . $p['host']) . (isset($p['port']) ? ':' . $p['port'] : '');
+        $settings['base_url'] = App::normalizeBaseUrl($this->req->input('base_url'));
         Fs::writeJson($file, $settings);
         $this->db->audit('admin', 'settings', 'base_url ' . $settings['base_url'], $this->user());
         // the sitemap, hreflang and canonical links are built from base_url
         (new Builder(new App($this->app->root)))->build();
         (new Previews($this->app))->rebuild();
         return Response::redirect(self::SELF . '?r=settings&saved=1');
+    }
+
+    // ---------------------------------------------------------------- updates
+
+    private function updater(): Updater
+    {
+        return $this->updater ?? new Updater($this->app);
+    }
+
+    /** For tests: use this updater (fake HTTP, test signing key). */
+    public function useUpdater(Updater $updater): void
+    {
+        $this->updater = $updater;
+    }
+
+    private function rGetUpdates(array $extra = []): Response
+    {
+        $u = $this->updater();
+        $updated = is_file($this->app->varDir . '/updated.json') ? Fs::readJson($this->app->varDir . '/updated.json') : null;
+        return $this->page('Updates', 'updates', $extra + [
+            'version'    => App::VERSION,
+            'blocked'    => $u->blocked(),
+            'signed'     => $u->signaturesChecked(),
+            'check'      => $u->lastCheck(),
+            'updated'    => $updated,
+            'needsBuild' => Updater::needsRebuild($this->app),
+            'maxUpload'  => (string) ini_get('upload_max_filesize'),
+            'checkError' => null,
+        ]);
+    }
+
+    private function rPostUpdateCheck(): Response
+    {
+        try {
+            $this->updater()->check();
+        } catch (LouException $e) {
+            return $this->rGetUpdates(['checkError' => $e->getMessage()]);
+        }
+        return Response::redirect(self::SELF . '?r=updates');
+    }
+
+    /** Download the release found by the last check and swap in its code. The rebuild runs on the next request. */
+    private function rPostUpdate(): Response
+    {
+        $u = $this->updater();
+        $zip = $u->download();
+        try {
+            $r = $u->apply($zip);
+        } finally {
+            @unlink($zip);
+        }
+        $this->db->audit('admin', 'update', "{$r['from']} → {$r['to']}" . ($r['signed'] ? '' : ' (unsigned)'), $this->user());
+        return Response::redirect(self::SELF . '?r=updates');
+    }
+
+    private function rPostUpdateUpload(): Response
+    {
+        $file = $this->req->files['release'] ?? null;
+        if (!is_array($file) || ($file['error'] ?? 1) !== UPLOAD_ERR_OK || !$this->isUploaded((string) $file['tmp_name'])) {
+            throw new LouException('Upload a Lou release .zip (lou-<version>.zip)');
+        }
+        $r = $this->updater()->apply((string) $file['tmp_name'], $this->req->input('allow_older') === '1');
+        $this->db->audit('admin', 'update', "{$r['from']} → {$r['to']} (uploaded" . ($r['signed'] ? ')' : ', unsigned)'), $this->user());
+        return Response::redirect(self::SELF . '?r=updates');
+    }
+
+    /** Rebuild the live site and previews with the code on disk (after an update). */
+    private function rPostRebuild(): Response
+    {
+        $r = (new Builder(new App($this->app->root)))->build();
+        (new Previews($this->app))->rebuildAll();
+        $this->db->audit('admin', 'rebuild', $r['id'], $this->user());
+        return $this->page('Rebuilt', 'message', ['message' => "The site was rebuilt with Lou " . App::VERSION . " ({$r['pages']} pages)."]);
     }
 
     private function rGetBuilds(): Response
@@ -691,16 +732,18 @@ final class AdminApp
             throw new LouException('Unknown build');
         }
         $out = $this->app->outputDir();
-        $tmp = dirname($out) . '/.lou-rollback-' . bin2hex(random_bytes(3));
+        $output = new Output($this->app);
+        $id = 'rollback-' . bin2hex(random_bytes(3));
+        $tmp = $output->tempDir($out, $id, $output->mode());
         Fs::copyDir($this->app->varDir . "/builds/$name", $tmp);
         if (is_dir("$out/_lou/p")) {
             Fs::ensureDir("$tmp/_lou");
             rename("$out/_lou/p", "$tmp/_lou/p");
         }
-        $old = dirname($out) . '/.lou-old-' . bin2hex(random_bytes(3));
-        rename($out, $old);
-        rename($tmp, $out);
-        Fs::removeDir($old);
+        $old = $output->swap($tmp, $out, $id, $output->mode());
+        if ($old !== null) {
+            Fs::removeDir($old);
+        }
         @unlink($this->app->varDir . '/live.json');
         $this->db->audit('admin', 'rollback', $name, $this->user());
         return $this->page('Rolled back', 'message', ['message' => "The live site was restored to the build $name. "
@@ -896,6 +939,8 @@ final class AdminApp
             'unpublished' => $this->session->get('user') ? $this->unpublished() : false,
             'staged'      => $this->session->get('user') ? count(Workspace::staging($this->app)->changedFiles()) : 0,
             'drafted'     => $this->session->get('user') ? count($this->draft()->changedFiles()) : 0,
+            'needsRebuild' => $this->session->get('user') ? Updater::needsRebuild($this->app) : false,
+            'louVersion'  => App::VERSION,
         ];
         $render = static function (string $__file, array $__vars) use ($e): string {
             extract($__vars, EXTR_SKIP);

@@ -23,3 +23,5 @@ jobs:
         run: php tests/run.php
       - name: Build example site
         run: php lou build
+      - name: Build a release zip
+        run: php lou release --out=dist

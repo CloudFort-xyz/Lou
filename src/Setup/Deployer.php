@@ -17,7 +17,7 @@ use Lou\Support\Fs;
 final class Deployer
 {
     /** Code shipped on every deploy (folders are replaced whole, files overwritten). */
-    public const CODE = ['src', 'stubs', 'vendor-bundled', 'lou', '.env.example.php'];
+    public const CODE = ['src', 'stubs', 'vendor-bundled', 'lou', '.env.example.php', 'starters'];
 
     public function __construct(private readonly string $source)
     {

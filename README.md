@@ -15,13 +15,21 @@ See [docs/SPEC.md](docs/SPEC.md) for the full design.
 - Milestone 2 (forms): one submit endpoint for all forms, SQLite storage, SMTP via bundled PHPMailer, Mailchimp/MailerLite/webhook newsletter sign-ups, webhooks, layered spam protection with optional Turnstile/reCAPTCHA, and progressive-enhancement JS.
 - Milestone 4 (LLM bridge): an MCP server at `/_lou/mcp.php` (plus a REST/OpenAPI fallback) that lets any assistant edit a staged copy of `site/`, build a private preview and submit it. Its changes land on staging for review. Tokens and connection snippets live under **Assistants**.
 
-## Quick start
+## Install
+
+Download `lou-<version>.zip` from the [releases](https://github.com/CloudFort-xyz/Lou/releases), upload the `lou/` folder next to your web root, point the domain at `lou/public` (or copy `install.php` into a fixed `public_html`) and open the site. The web installer checks the server, sets up the site, your admin account and email, and builds. Updates come from **Admin → Updates** or `php lou update`, verified against the release signature. No Git, SSH or Composer is needed. See [docs/install.md](docs/install.md).
+
+Git-based deploys (`php lou deploy`, cPanel's `.cpanel.yml`) remain available: see [docs/deploy-cpanel.md](docs/deploy-cpanel.md).
+
+## Quick start (from a checkout)
 
 ```sh
 php lou build           # build site/ into public/ (atomic swap)
 php lou user add NAME --role=admin   # create an admin user, then open /_lou/admin.php
 php lou serve           # build a preview and serve it on http://localhost:8000
 php lou check           # check PHP version, extensions, folders and config
+php lou update          # update Lou from the latest release (installs from a zip)
+php lou release         # build lou-<version>.zip into dist/
 php lou deploy ~/lou    # copy the code from this checkout into an install and build (cPanel)
 php lou backup          # single-file backup into var/backups/
 php lou restore FILE    # restore a backup (the current state is backed up first)
