@@ -208,7 +208,9 @@ Deploy options:
   install has none, and builds. `site/`, `var/` and `.env.php` are never
   overwritten, because the server's `site/` is the truth. cPanel runs it from
   `.cpanel.yml` (see `docs/deploy-cpanel.md`). KeyHelp can do the same from a
-  deploy hook.
+  deploy hook. A client site kept in its own repository (Lou as a submodule)
+  deploys with `--site=DIR` to seed from its own `site/`; `--pull` then pulls
+  the client repository and its pinned Lou commit.
 - `php lou check` reports missing PHP pieces (version, extensions, writable
   folders) and config warnings.
 

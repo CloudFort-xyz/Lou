@@ -74,6 +74,25 @@ All sites listed move to a new Lou version together. If a site needs to stay on 
 
 Everywhere this guide says `~/lou`, read your folder instead.
 
+### A client site in its own repository
+
+A client's site can live in its own repository, with Lou pinned as a Git submodule:
+
+```
+kner.hu-lou/
+  lou/           submodule → CloudFort-xyz/Lou at a pinned commit
+  site/          the client's config, content, templates and assets
+  .cpanel.yml
+```
+
+Clone it recursively (`git clone --recurse-submodules …`, or tick nothing extra in cPanel and run `git submodule update --init` once in the clone), and deploy with `--site` so the first deploy seeds the install from the client's `site/` rather than Lou's example site:
+
+```sh
+php ~/repositories/kner.hu-lou/lou/lou deploy ~/domains/kner.hu --site=$HOME/repositories/kner.hu-lou/site
+```
+
+For automatic deploys, add `--pull` to the same command in cron. With `--site`, it pulls the client repository (not Lou), checks out the Lou commit it pins, then deploys with that code. Moving the client to a newer Lou is a commit in the client repository that bumps the submodule.
+
 ## 3. First deploy
 
 In **Git Version Control → Manage → Pull or Deploy**, click **Deploy HEAD Commit**. You can also run it yourself:

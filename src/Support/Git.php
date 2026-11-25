@@ -16,7 +16,7 @@ final class Git
 
     public static function available(string $root): bool
     {
-        return is_dir($root . '/.git') && function_exists('proc_open');
+        return file_exists($root . '/.git') && function_exists('proc_open');
     }
 
     /** @return string|null the new commit hash, or null when there was nothing to commit */
@@ -45,6 +45,24 @@ final class Git
         }
         $this->run(['merge', '--ff-only', '--quiet', '@{u}']);
         return true;
+    }
+
+    /** Top folder of the working tree that contains $root (e.g. the client repo around a site/ folder). */
+    public function topLevel(): string
+    {
+        return $this->run(['rev-parse', '--show-toplevel'])[1];
+    }
+
+    /** Absolute path of the .git folder (works for submodules and worktrees, where .git is a file). */
+    public function gitDir(): string
+    {
+        return $this->run(['rev-parse', '--absolute-git-dir'])[1];
+    }
+
+    /** Checks out the commits the superproject pins for its submodules (e.g. the Lou version of a client site). */
+    public function updateSubmodules(): void
+    {
+        $this->run(['submodule', 'update', '--init', '--recursive', '--quiet']);
     }
 
     /** @return array{0: int, 1: string} */

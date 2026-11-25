@@ -91,6 +91,58 @@ test('deploy: copies code, seeds site/ once, keeps site/, var/ and .env.php on l
     check(glob("$target/.lou-deploy-*") === [] && glob("$target/*.lou-old") === [], 'no leftovers');
 });
 
+test('deploy --site: seeds the install from a client site folder, once, and refuses folders without config.php', function () {
+    $repo = dirname(__DIR__, 2);
+    $client = temp_dir();
+    Fs::copyDir("$repo/site", "$client/site");
+    Fs::write("$client/site/templates/client-marker.php", 'client');
+    $target = temp_dir() . '/kner';
+    $r = (new Deployer($repo, "$client/site"))->deploy($target);
+    check($r['seeded'], 'first deploy seeds site/');
+    check(is_file("$target/site/templates/client-marker.php"), 'seeded from the client site, not the example');
+    check(is_file("$target/src/App.php"), 'code still comes from the Lou checkout');
+
+    Fs::write("$client/site/templates/later.php", 'later');
+    $r = (new Deployer($repo, "$client/site"))->deploy($target);
+    check(!$r['seeded'] && !is_file("$target/site/templates/later.php"), 'later deploys keep the server copy');
+
+    try {
+        (new Deployer($repo, temp_dir()))->deploy(temp_dir() . '/x');
+        check(false, 'a folder without config.php should fail');
+    } catch (LouException $e) {
+        contains($e->getMessage(), 'not a Lou site folder');
+    }
+});
+
+test('git: finds the client repo, its .git folder and updates submodules from a site/ subfolder', function () {
+    $dir = temp_dir();
+    $git = function (string $cwd, string ...$args): void {
+        $cmd = 'git -C ' . escapeshellarg($cwd) . ' -c user.name=t -c user.email=t@t -c init.defaultBranch=main '
+            . '-c protocol.file.allow=always ' . implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
+        exec($cmd, $out, $code);
+        check($code === 0, "$cmd: " . implode("\n", $out));
+    };
+    mkdir("$dir/core");
+    $git("$dir/core", 'init', '-q');
+    file_put_contents("$dir/core/lou", 'x');
+    $git("$dir/core", 'add', '.');
+    $git("$dir/core", 'commit', '-qm', 'core');
+    mkdir("$dir/client/site", 0777, true);
+    $git("$dir/client", 'init', '-q');
+    file_put_contents("$dir/client/site/config.php", '<?php return [];');
+    $git("$dir/client", 'submodule', 'add', '-q', "$dir/core", 'lou');
+    $git("$dir/client", 'commit', '-qam', 'client');
+
+    $client = new Lou\Support\Git("$dir/client/site");
+    check($client->topLevel() === realpath("$dir/client"), 'top level: ' . $client->topLevel());
+    check($client->gitDir() === realpath("$dir/client") . '/.git', 'git dir: ' . $client->gitDir());
+    check(Lou\Support\Git::available("$dir/client/lou"), 'a submodule (.git file) counts as a checkout');
+    Fs::removeDir("$dir/client/lou");
+    mkdir("$dir/client/lou");
+    $client->updateSubmodules();
+    check(is_file("$dir/client/lou/lou"), 'submodule checked out again');
+});
+
 test('deploy: refuses relative targets and the checkout itself', function () {
     $repo = dirname(__DIR__, 2);
     foreach (['relative/lou', $repo] as $bad) {

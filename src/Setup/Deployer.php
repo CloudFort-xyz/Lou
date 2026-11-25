@@ -13,13 +13,16 @@ use Lou\Support\Fs;
  * Code is replaced; content and runtime data are not. site/ is seeded from the checkout only when the
  * install has none, because after that the server's site/ is the truth (editor, assistants, history).
  * var/, .env.php and the build output are never touched.
+ *
+ * A client site kept in its own repository (with Lou as a submodule) passes its site/ folder as $siteSource,
+ * so the first deploy seeds the install from the client's site instead of Lou's example site.
  */
 final class Deployer
 {
     /** Code shipped on every deploy (folders are replaced whole, files overwritten). */
     public const CODE = ['src', 'stubs', 'vendor-bundled', 'lou', '.env.example.php'];
 
-    public function __construct(private readonly string $source)
+    public function __construct(private readonly string $source, private readonly ?string $siteSource = null)
     {
     }
 
@@ -54,6 +57,10 @@ final class Deployer
         if ($target === '' || !str_starts_with($target, '/')) {
             throw new LouException('The install folder must be an absolute path');
         }
+        $site = $this->siteSource === null ? "$source/site" : rtrim((string) realpath($this->siteSource), '/');
+        if ($site === '' || !is_file("$site/config.php")) {
+            throw new LouException("$this->siteSource is not a Lou site folder (no config.php)");
+        }
         Fs::ensureDir($target);
         if (realpath($target) === $source) {
             throw new LouException('The install folder must not be the checkout itself');
@@ -85,8 +92,8 @@ final class Deployer
         @chmod("$target/lou", 0755);
 
         $seeded = false;
-        if (!is_dir("$target/site") && is_dir("$source/site")) {
-            Fs::copyDir("$source/site", "$target/site");
+        if (!is_dir("$target/site")) {
+            Fs::copyDir($site, "$target/site");
             $seeded = true;
         }
         return ['target' => $target, 'code' => $copied, 'seeded' => $seeded];
