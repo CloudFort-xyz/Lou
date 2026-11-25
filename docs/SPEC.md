@@ -413,6 +413,12 @@ expiry).
   same item everywhere; each language copies its own text. Languages whose
   list differs are left alone and named in the editor's status line. A
   duplicated image is replaced by clicking the copy (the normal image dialog).
+- **Paragraphs inside rich-text fields** (`editable(..., 'html')`) get the
+  same toolbar per top-level block (paragraph, list, heading): duplicate,
+  move up/down, delete (not the last one). This is done in the browser on
+  the field's HTML and saved like a text edit (sanitised on the server, one
+  undo step). While the field is open it just changes the text being edited,
+  so Esc still cancels everything.
 - **Undo/redo** in the editor (buttons, Ctrl+Z, Ctrl+Shift+Z/Ctrl+Y), per
   person and per page, kept on the server in `var/undo/` (last 50 steps), so
   it survives reloads. Every editor change records the page's content files

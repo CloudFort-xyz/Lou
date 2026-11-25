@@ -581,7 +581,7 @@ return [
     'Failed' => 'Nem sikerült',
     // editor undo/redo and list items
     'Redo' => 'Mégis',
-    'Repeating parts (cards, columns, gallery images…) show a small toolbar when you point at them: duplicate, move or delete. Duplicate an image, then click the copy to upload a new file.' => 'Az ismétlődő részek (kártyák, oszlopok, galériaképek…) fölé állva egy kis eszköztár jelenik meg: másolat, áthelyezés vagy törlés. Képnél készíts másolatot, majd a másolatra kattintva tölts fel új fájlt.',
+    'Repeating parts (cards, columns, gallery images…) and paragraphs in longer texts show a small toolbar when you point at them: duplicate, move or delete. Duplicate an image, then click the copy to upload a new file.' => 'Az ismétlődő részek (kártyák, oszlopok, galériaképek…) és a hosszabb szövegek bekezdései fölé állva egy kis eszköztár jelenik meg: másolat, áthelyezés vagy törlés. Képnél készíts másolatot, majd a másolatra kattintva tölts fel új fájlt.',
     'Undo, autosave and keyboard shortcuts' => 'Visszavonás, automatikus mentés és billentyűparancsok',
     'Every change is saved to your draft right away. Undo and Redo step through your changes on this page (Ctrl+Z, Ctrl+Shift+Z), even after a reload.' => 'Minden módosítás azonnal a piszkozatodba kerül. A Visszavonás és a Mégis lépésenként végigmegy az oldalon tett módosításaidon (Ctrl+Z, Ctrl+Shift+Z), újratöltés után is.',
     'While you type, the text is also kept in this browser. If the page closes before it’s saved, you’re asked whether to restore it next time.' => 'Gépelés közben a szöveget ez a böngésző is megőrzi. Ha az oldal mentés előtt bezárul, legközelebb megkérdezzük, hogy visszaállítsuk-e.',

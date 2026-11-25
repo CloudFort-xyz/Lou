@@ -43,7 +43,7 @@
     </details>
     <details class="fold fold-panel"><summary><h2><?= $t('How to edit') ?></h2></summary>
     <p class="muted"><?= $t('Click any highlighted text in the preview to edit it, then click outside to save. Click an image to replace it or change its description.') ?></p>
-    <p class="muted"><?= $t('Repeating parts (cards, columns, gallery images…) show a small toolbar when you point at them: duplicate, move or delete. Duplicate an image, then click the copy to upload a new file.') ?></p>
+    <p class="muted"><?= $t('Repeating parts (cards, columns, gallery images…) and paragraphs in longer texts show a small toolbar when you point at them: duplicate, move or delete. Duplicate an image, then click the copy to upload a new file.') ?></p>
     <details class="muted">
       <summary><?= $t('Undo, autosave and keyboard shortcuts') ?></summary>
       <p><?= $t('Every change is saved to your draft right away. Undo and Redo step through your changes on this page (Ctrl+Z, Ctrl+Shift+Z), even after a reload.') ?></p>
