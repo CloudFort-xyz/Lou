@@ -92,6 +92,7 @@ final class AdminApp
         'POST settings'       => 'admin',
         'POST mail-settings'  => 'admin',
         'POST mail-test'      => 'admin',
+        'POST admin-language' => 'admin',
         'GET updates'         => 'admin',
         'POST update-check'   => 'admin',
         'POST update'         => 'admin',
@@ -191,6 +192,92 @@ final class AdminApp
     {
         $this->session->destroy();
         return Response::redirect(self::SELF . '?r=login');
+    }
+
+    // ---------------------------------------------------------------- profile (every user, their own)
+
+    private function rGetProfile(): Response
+    {
+        $site = Site::load($this->app);
+        return $this->page($this->tr('Profile'), 'profile', [
+            'prefs'         => $this->prefs(),
+            'languages'     => I18n::LANGUAGES,
+            'siteLanguage'  => $this->siteAdminLanguage(),
+            'contentLanguages' => $site->languages(),
+            'defaultContentLanguage' => $site->defaultLanguage(),
+            'timezones'     => \DateTimeZone::listIdentifiers(),
+            'formats'       => Prefs::DATE_FORMATS,
+            'sample'        => $this->time(),
+        ]);
+    }
+
+    private function rPostProfile(): Response
+    {
+        $in = fn (string $k): string => $this->req->input($k);
+        $prefs = Prefs::fromArray(['lang' => $in('lang'), 'timezone' => $in('timezone'), 'date_format' => $in('date_format'),
+            'edit_lang' => $in('edit_lang'), 'start_page' => $in('start_page')]);
+        if ($in('timezone') !== '' && $prefs->timezone === '') {
+            throw new LouException($this->tr('Unknown time zone: {tz}', ['tz' => $in('timezone')]));
+        }
+        $this->users()->setPrefs((string) $this->user(), $prefs);
+        $this->db->audit('admin', 'profile', implode(', ', array_map(fn ($k, $v) => "$k=$v", array_keys($prefs->toArray()), $prefs->toArray())) ?: 'defaults', $this->user());
+        // the notice is shown in the newly chosen language
+        $this->prefs = $prefs;
+        $this->i18n = null;
+        return $this->done('profile', $this->tr('Your preferences were saved.'));
+    }
+
+    private function rPostPassword(): Response
+    {
+        $new = $this->req->input('new_password');
+        if ($new !== $this->req->input('new_password2')) {
+            throw new LouException($this->tr('The two new passwords are not the same.'));
+        }
+        $this->users()->changePassword((string) $this->user(), $this->req->input('current_password'), $new);
+        $this->db->audit('admin', 'password', null, $this->user());
+        return $this->done('profile', $this->tr('Your password was changed.'));
+    }
+
+    private function users(): Users
+    {
+        return new Users($this->app->varDir . '/users.json');
+    }
+
+    /** The signed-in user's preferences (defaults when logged out). */
+    private function prefs(): Prefs
+    {
+        if ($this->prefs === null) {
+            $user = $this->session->get('user');
+            $this->prefs = is_string($user) ? $this->users()->prefs($user) : new Prefs();
+        }
+        return $this->prefs;
+    }
+
+    /** The site-wide admin language: 'admin_language' in site/config.php or Settings, else none. */
+    private function siteAdminLanguage(): string
+    {
+        $lang = (string) ($this->app->config['admin_language'] ?? '');
+        return isset(I18n::LANGUAGES[$lang]) ? $lang : '';
+    }
+
+    /** The user's language, else the site's, else the browser's (Accept-Language), else English. */
+    private function i18n(): I18n
+    {
+        return $this->i18n ??= I18n::load($this->prefs()->lang ?: $this->siteAdminLanguage()
+            ?: (I18n::negotiate($this->req->header('accept-language')) ?? 'en'));
+    }
+
+    /** Translated plain text (see I18n): escape it where it is output. */
+    private function tr(string $message, array $vars = []): string
+    {
+        return $this->i18n()->plain($message, $vars);
+    }
+
+    /** The content language the editor opens in: the user's choice if the site has it, else the site default. */
+    private function editLang(Site $site): string
+    {
+        $l = $this->prefs()->editLang;
+        return $l !== '' && in_array($l, $site->languages(), true) ? $l : $site->defaultLanguage();
     }
 
     private function user(): ?string
@@ -674,6 +761,24 @@ final class AdminApp
         $this->integrations = $integrations;
     }
 
+    /** The site-wide default admin language (users can still pick their own under Profile). */
+    private function rPostAdminLanguage(): Response
+    {
+        $lang = $this->req->input('admin_language');
+        if ($lang !== '' && !isset(I18n::LANGUAGES[$lang])) {
+            throw new LouException($this->tr('Unknown language'));
+        }
+        $settings = $this->app->settings();
+        if ($lang === '') {
+            unset($settings['admin_language']);
+        } else {
+            $settings['admin_language'] = $lang;
+        }
+        Fs::writeJson($this->app->varDir . '/settings.json', $settings);
+        $this->db->audit('admin', 'settings', 'admin_language ' . ($lang ?: 'auto'), $this->user());
+        return Response::redirect(self::SELF . '?r=settings&language-saved=1#admin-language');
+    }
+
     private function rPostSettings(): Response
     {
         $file = $this->app->varDir . '/settings.json';
@@ -987,23 +1092,10 @@ final class AdminApp
         return Response::redirect(self::SELF . '?r=' . $route);
     }
 
-    /**
-     * A timestamp as <time>: readable UTC in the HTML, and admin.js shows it in the browser's own time zone.
-     * Takes an ISO date, a SQLite "Y-m-d H:i:s" (UTC) or a Unix time.
-     */
+    /** A timestamp as <time> with the default preferences (UTC, admin.js localises it). See Prefs::stamp(). */
     public static function stamp(string|int|null $at, bool $dateOnly = false): string
     {
-        if ($at === null || $at === '') {
-            return '';
-        }
-        try {
-            $d = is_int($at) ? new \DateTimeImmutable("@$at") : new \DateTimeImmutable($at, new \DateTimeZone('UTC'));
-        } catch (\Exception) {
-            return Html::escape((string) $at);
-        }
-        $d = $d->setTimezone(new \DateTimeZone('UTC'));
-        return '<time datetime="' . $d->format('Y-m-d\\TH:i:s\\Z') . '"' . ($dateOnly ? ' data-date' : '') . '>'
-            . $d->format($dateOnly ? 'Y-m-d' : 'Y-m-d H:i') . ($dateOnly ? '' : ' UTC') . '</time>';
+        return (new Prefs())->stamp($at, $dateOnly, 'en');
     }
 
     private function deny(): Response
@@ -1044,7 +1136,17 @@ final class AdminApp
             'needsRebuild' => $this->session->get('user') ? Updater::needsRebuild($this->app) : false,
             'louVersion'  => App::VERSION,
             'flash'       => $this->takeFlash(),
-            'time'        => self::stamp(...),
+        ];
+        $t = $this->i18n();
+        $prefs = $this->prefs();
+        $vars += [
+            't'           => $t,
+            'uiLang'      => $t->lang,
+            'datePatterns' => $prefs->patterns($t->lang),
+            'time'        => static fn (string|int|null $at, bool $dateOnly = false): string => $prefs->stamp($at, $dateOnly, $t->lang),
+            // "user:bence" → "bence", "llm:Claude" → "Claude (assistant)"
+            'who'         => static fn (string $owner): string => str_starts_with($owner, 'llm:')
+                ? $t->plain('{name} (assistant)', ['name' => substr($owner, 4)]) : (string) preg_replace('/^user:/', '', $owner),
         ];
         $render = static function (string $__file, array $__vars) use ($e): string {
             extract($__vars, EXTR_SKIP);
