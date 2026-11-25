@@ -154,9 +154,11 @@ final class Tools
         $staging->addSubmission($this->caller, $summary, $files);
         $previews = new Previews($this->app);
         $previews->revokeSource('draft:' . $this->caller);
-        $previews->rebuild();
         $base = $this->siteUrl ?: $this->app->siteUrl();
+        $p = $previews->staging($base, $this->caller);   // the reviewer finds the preview ready
+        $previews->rebuild(null, $p ? [$p['token']] : []);
         return ['ok' => true, 'submitted' => $files, 'review_url' => $base . '/_lou/admin.php?r=review',
+            'preview_url' => $p ? rtrim($base, '/') . Previews::urlPrefix($p['token']) . '/' : null,
             'note' => 'Your changes are on staging. Ask the user to open the review page, check the preview and publish.'];
     }
 

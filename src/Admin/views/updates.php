@@ -40,12 +40,20 @@
   <?php endif ?>
 
   <h2 id="design">Site design from a zip</h2>
-  <p class="muted">Deploy a client site's templates and assets without Git: upload a zip of its repository (GitHub: Code → Download ZIP) or any zip with a <code>site/</code> folder. Templates and assets follow the zip, except files changed on the server since the last deploy. Content, menus, settings and uploaded images are never touched. The changes go into your draft, so you review and publish them as usual.</p>
+  <p>Upload a new version of the site's look: its templates, styles, scripts and design images. Texts, menus, settings and uploaded photos stay as they are. Nothing goes live until you have checked a preview and published it.</p>
   <form method="post" action="<?= $self ?>?r=design-upload" enctype="multipart/form-data" class="stack">
     <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
     <label>Site zip <input type="file" name="site" accept=".zip" required></label>
-    <p><button class="btn" type="submit">Import into my draft</button></p>
+    <label class="check"><input type="checkbox" name="review" value="1" checked> Send it to Review right away, with a preview</label>
+    <p><button class="btn btn-primary" type="submit">Upload the design</button></p>
   </form>
+  <details class="tech">
+    <summary>How it works</summary>
+    <p>Use a zip of the client site's repository (GitHub: Code → Download ZIP) or any zip with a <code>site/</code> folder, up to <?= $e($maxUpload) ?>.
+      Files under <code>templates/</code> and <code>assets/</code> follow the zip, except files changed on the server since the last deploy: those keep the server's version and are listed after the upload.
+      Content, <code>menu.json</code>, <code>config.php</code> and editor uploads are never touched. Templates go through the same safety checks as assistants' templates.</p>
+    <p>The changes land in your draft. With “Send it to Review” ticked and nothing else in your draft, they are submitted to staging at once and the preview is built; otherwise submit them under Review yourself.</p>
+  </details>
 
   <?php if ($needsBuild): ?>
     <h3>Rebuild</h3>

@@ -213,6 +213,13 @@ final class Workspace
         return array_values(array_diff(array_intersect($this->changedFiles(), $upAll), ['redirects.json']));
     }
 
+    /** @return array{0: ?string, 1: ?string} a changed file's contents before and after (null: no such file on that side) */
+    public function versions(string $path): array
+    {
+        $read = static fn (string $f): ?string => is_file($f) ? (string) file_get_contents($f) : null;
+        return [$read($this->baseDir() . "/$path"), $read($this->siteDir() . "/$path")];
+    }
+
     /** @return array<string, string> path => unified diff */
     public function diffs(): array
     {
