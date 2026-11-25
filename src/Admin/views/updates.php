@@ -39,8 +39,8 @@
     </form>
   <?php endif ?>
 
-  <h2 id="design">Site design from a zip</h2>
-  <p>Upload a new version of the site's look: its templates, styles, scripts and design images. Texts, menus, settings and uploaded photos stay as they are. Nothing goes live until you have checked a preview and published it.</p>
+  <h2 id="design">Design update from a zip</h2>
+  <p><strong>Design only:</strong> the site's templates, styles, scripts and design images are updated from the zip. Page texts, menus, settings and uploaded photos on this server are never changed, even if the zip contains them. Nothing goes live until you have checked a preview and published it.</p>
   <form method="post" action="<?= $self ?>?r=design-upload" enctype="multipart/form-data" class="stack">
     <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
     <label>Site zip <input type="file" name="site" accept=".zip" required></label>

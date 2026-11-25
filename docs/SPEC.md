@@ -226,7 +226,9 @@ Deploy options:
   and nothing else in the draft, the import is submitted to staging at once
   with the summary "Site design from <zip>" and its preview is built; with
   other edits in the draft, a conflict or a validation problem it waits in
-  the draft and the result page says why. `var/deploy-design.pending.json` holds what the
+  the draft and the result page says why. On the first import (no
+  `var/deploy-design.json`) files that exist only on the server are kept,
+  never deleted. `var/deploy-design.pending.json` holds what the
   import wrote until a publish makes it live (`DesignImport::confirm`).
 - **Git (optional):** the server's Git clone is kept separate from the live
   install. `php lou deploy DIR` copies the code (`src/`, `stubs/`,
