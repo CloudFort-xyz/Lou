@@ -124,28 +124,47 @@ final class Deployer
     private function syncDesign(string $from, string $site, string $manifestFile): array
     {
         $last = is_file($manifestFile) ? Fs::readJson($manifestFile) : [];
+        $plan = self::planDesign($from, $site, $last);
+        foreach ($plan['write'] as $rel) {
+            $tmp = "$site/$rel.lou-new";
+            Fs::ensureDir(dirname($tmp));
+            if (!copy("$from/$rel", $tmp) || !rename($tmp, "$site/$rel")) {
+                @unlink($tmp);
+                throw new LouException("Cannot update site/$rel");
+            }
+        }
+        foreach ($plan['delete'] as $rel) {
+            unlink("$site/$rel");
+        }
+        Fs::writeJson($manifestFile, $plan['next']);
+        return ['updated' => $plan['write'], 'deleted' => $plan['delete'], 'skipped' => $plan['skipped']];
+    }
+
+    /**
+     * What bringing $site's templates and assets up to date with $from would do, without doing it.
+     * A file is written or deleted only when the copy in $site is still what the last deploy put there
+     * ($last: path => sha1); a file changed since is skipped. Editor uploads are never touched.
+     * @param array<string, string> $last
+     * @return array{write: list<string>, delete: list<string>, skipped: list<string>, next: array<string, string>}
+     *         next: the manifest after doing it
+     */
+    public static function planDesign(string $from, string $site, array $last): array
+    {
         $repo = self::designHashes($from);
         $server = self::designHashes($site);
-        $next = [];
-        $out = ['updated' => [], 'deleted' => [], 'skipped' => []];
+        $plan = ['write' => [], 'delete' => [], 'skipped' => [], 'next' => []];
         foreach ($repo as $rel => $hash) {
             $here = $server[$rel] ?? null;
             if ($here === $hash) {
-                $next[$rel] = $hash;
+                $plan['next'][$rel] = $hash;
             } elseif ($here === null || ($last[$rel] ?? null) === $here) {
-                $tmp = "$site/$rel.lou-new";
-                Fs::ensureDir(dirname($tmp));
-                if (!copy("$from/$rel", $tmp) || !rename($tmp, "$site/$rel")) {
-                    @unlink($tmp);
-                    throw new LouException("Cannot update site/$rel");
-                }
-                $next[$rel] = $hash;
-                $out['updated'][] = $rel;
+                $plan['write'][] = $rel;
+                $plan['next'][$rel] = $hash;
             } else {
                 if (isset($last[$rel])) {
-                    $next[$rel] = $last[$rel];
+                    $plan['next'][$rel] = $last[$rel];
                 }
-                $out['skipped'][] = $rel;
+                $plan['skipped'][] = $rel;
             }
         }
         foreach ($last as $rel => $hash) {
@@ -153,18 +172,16 @@ final class Deployer
                 continue;
             }
             if ($server[$rel] === $hash) {
-                unlink("$site/$rel");
-                $out['deleted'][] = $rel;
+                $plan['delete'][] = $rel;
             } else {
-                $out['skipped'][] = $rel;
+                $plan['skipped'][] = $rel;
             }
         }
-        Fs::writeJson($manifestFile, $next);
-        return $out;
+        return $plan;
     }
 
     /** @return array<string, string> site-relative path => sha1, for the DESIGN folders minus KEEP */
-    private static function designHashes(string $site): array
+    public static function designHashes(string $site): array
     {
         $out = [];
         foreach (self::DESIGN as $dir) {
