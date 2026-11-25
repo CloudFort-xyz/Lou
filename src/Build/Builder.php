@@ -25,7 +25,7 @@ final class Builder
      * @param string      $mode   View::MODE_LIVE writes redirects + manifest and keeps build history;
      *                            View::MODE_PREVIEW only renders (with editor markers).
      * @param string|null $outDir    defaults to the configured output dir
-     * @param string      $urlPrefix preview builds served from a sub-path (e.g. /_lou/p/<token>)
+     * @param string      $urlPrefix preview builds served from a sub-path (e.g. /_app/p/<token>)
      * @param string      $inject    HTML inserted before </body> in every page (preview only, e.g. the editor script);
      *                               {page} and {lang} are replaced with the page id and language
      * @return array{id: string, output: string, pages: int, warnings: list<string>, redirects: array}
@@ -47,6 +47,16 @@ final class Builder
             if (!$page->isSpecial()) {
                 $manifest["{$page->id}|{$page->lang}"] = $site->path($page->id, $page->lang);
             }
+        }
+        $endpointPrefix = $this->app->endpoint() . '/';
+        foreach ($manifest as $key => $path) {
+            if (str_starts_with($path, $endpointPrefix) || $path === $this->app->endpoint()) {
+                throw new LouException("Page $key would be served at $path, inside the endpoint folder " . $this->app->endpoint()
+                    . '/. Change its slug or the endpoint_dir setting.');
+            }
+        }
+        if ($live) {
+            array_push($warnings, ...self::legacyFormNames($this->app->siteDir));
         }
         $redirectsFile = $this->app->siteDir . '/redirects.json';
         $entries = is_file($redirectsFile) ? Fs::readJson($redirectsFile) : [];
@@ -84,8 +94,11 @@ final class Builder
                 Fs::copyDir($this->app->siteDir . '/assets', $tmp . '/assets');
             }
             if ($live) {
-                Fs::copyDir($this->app->stubsDir, $tmp);
-                foreach (glob($tmp . '/_lou/*.php') ?: [] as $stub) {
+                // stubs/.htaccess goes to the web root, stubs/_lou/ to the endpoint folder (setting endpoint_dir)
+                $endpoints = $tmp . $this->app->endpoint();
+                Fs::write($tmp . '/.htaccess', (string) file_get_contents($this->app->stubsDir . '/.htaccess'));
+                Fs::copyDir($this->app->stubsDir . '/_lou', $endpoints);
+                foreach (glob($endpoints . '/*.php') ?: [] as $stub) {
                     // endpoint stubs require Lou core from outside the web root
                     Fs::write($stub, str_replace('__LOU_ROOT__', var_export($this->app->root, true), (string) file_get_contents($stub)));
                 }
@@ -107,10 +120,11 @@ final class Builder
             throw $e;
         }
 
-        // 3. atomic swap (live previews under /_lou/p/ survive a publish)
-        if ($live && is_dir($out . '/_lou/p')) {
-            Fs::ensureDir($tmp . '/_lou');
-            rename($out . '/_lou/p', $tmp . '/_lou/p');
+        // 3. atomic swap (live previews under /<endpoint_dir>/p/ survive a publish)
+        $previews = $this->app->endpoint('p');
+        if ($live && is_dir($out . $previews)) {
+            Fs::ensureDir(dirname($tmp . $previews));
+            rename($out . $previews, $tmp . $previews);
         }
         $old = $output->swap($tmp, $out, $id, $swap, $warnings);
 
@@ -130,6 +144,27 @@ final class Builder
     }
 
     /** Fingerprint of everything that affects the build, to detect unpublished changes. */
+    /**
+     * Form hooks were renamed so the public site doesn't name Lou: data-lou-status → data-status,
+     * .lou-error → .form-error, .lou-status--ok/--error → .form-status--ok/--error, and the honeypot (.lou-hp)
+     * is hidden with the hidden attribute. Warns about templates and stylesheets still using the old names.
+     * @return list<string>
+     */
+    public static function legacyFormNames(string $siteDir): array
+    {
+        $found = [];
+        foreach (['templates', 'assets'] as $sub) {
+            foreach (is_dir("$siteDir/$sub") ? Fs::files("$siteDir/$sub") : [] as $rel) {
+                if (preg_match('/\.(php|css|js|html)$/', $rel)
+                    && preg_match('/data-lou-(status|error)|\.lou-(hp|error|status)/', (string) file_get_contents("$siteDir/$sub/$rel"))) {
+                    $found[] = "$sub/$rel";
+                }
+            }
+        }
+        return $found === [] ? [] : ['Old Lou form names in ' . implode(', ', $found) . ': use data-status instead of data-lou-status, '
+            . '.form-error, .form-status--ok and .form-status--error instead of .lou-error and .lou-status--…, and drop the .lou-hp rule.'];
+    }
+
     public static function siteHash(App $app): string
     {
         $h = hash_init('sha256');

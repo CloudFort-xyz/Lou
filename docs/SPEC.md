@@ -293,6 +293,22 @@ came from the editor, an LLM or a hand edit over FTP.
 
 ## 7. Runtime endpoint for the site (`public/_lou/submit.php`)
 
+**The endpoint folder.** `_lou/` in this document stands for the endpoint
+folder, set by `endpoint_dir` in `var/settings.json` (a server setting only;
+`site/config.php` can't change it). The web installer gives new installs the
+neutral `_app`; installs without the setting keep `_lou`. Admin → Settings →
+Admin folder moves it (rebuild, new preview links, redirect to the new admin).
+Pages may not live inside it. The public site doesn't name Lou: no generator
+tag, no `data-lou-*` or `lou-*` names in built pages or `forms.js`, neutral
+session cookie (`__Host-sid`) and bearer realm. Form hooks are `data-form`,
+`data-recaptcha`, `data-status` (an element for the result message, added by
+`forms.js` when the template has none), `.form-error`, `.form-status--ok` and
+`.form-status--error`; the honeypot uses the `hidden` attribute, so it needs
+no CSS. A build warns about templates or stylesheets still using the old
+`data-lou-status` / `.lou-*` names. What still gives Lou away: the admin
+login page itself, the bridge's tool names (`?openapi` is public), and the
+`lou_` prefix of bridge tokens (secret anyway).
+
 All visitor-facing interaction goes through **one endpoint**,
 `/_lou/submit.php`. The admin (`/_lou/admin/`), the LLM bridge
 (`/_lou/mcp.php`) and the preview passthrough (`/_lou/preview.php`) stay

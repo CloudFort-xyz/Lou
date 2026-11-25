@@ -53,7 +53,7 @@ Then fill in:
 
 ## 4. Afterwards
 
-- Log in at `https://your-domain/_lou/admin.php`.
+- Log in at `https://your-domain/_app/admin.php`.
 - Add cron jobs if the host has them (use the full PHP path, see `docs/deploy-cpanel.md`):
 
   ```

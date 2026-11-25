@@ -269,7 +269,7 @@ try {
                 }
             } elseif ($sub === 'add') {
                 $token = $tokens->create(implode(' ', array_slice($pos, 2)));
-                echo "$token\nShown once. Bridge URL: " . rtrim((string) $app->config['base_url'], '/') . "/_lou/mcp.php\n";
+                echo "$token\nShown once. Bridge URL: " . rtrim((string) $app->config['base_url'], '/') . $app->endpoint('mcp.php') . "\n";
                 if (!$app->baseUrlConfigured()) {
                     fwrite(STDERR, "Warning: base_url in site/config.php is not your real address, so the URL above is wrong.\n");
                 }
@@ -357,7 +357,7 @@ try {
               user list|add NAME [--role=admin] [--lang=hu]|remove NAME
                                               Manage admin users (add prompts for the password;
                                               --lang sets their admin language, see Profile)
-              token list|add NAME|revoke ID   Manage LLM bridge tokens (/_lou/mcp.php)
+              token list|add NAME|revoke ID   Manage LLM bridge tokens (mcp.php in the endpoint folder)
               check                           Check PHP version, extensions, folders and config for this install
               deploy [DIR] [--site=DIR] [--no-build] [--pull]
                                               Copy the code from this checkout into an install, seed site/ on the

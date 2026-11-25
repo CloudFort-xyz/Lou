@@ -32,7 +32,7 @@ $builtAt = static function (string $name) use ($time): string {
   <thead><tr><th><?= $t('Link') ?></th><th><?= $t('Kind') ?></th><th><?= $t('Expires') ?></th><th><span class="sr"><?= $t('Actions') ?></span></th></tr></thead>
   <tbody>
   <?php foreach ($previews as $token => $p): $id = 'preview-' . substr($token, 0, 8); ?>
-    <tr><td><code id="<?= $e($id) ?>" class="sr"><?= $e($base . '/_lou/p/' . $token . '/') ?></code><code>/_lou/p/<?= $e(substr($token, 0, 6)) ?>…</code> <small class="muted"><?= $t('by {name}', ['name' => $p['by'] ?? '?']) ?></small></td>
+    <tr><td><code id="<?= $e($id) ?>" class="sr"><?= $e($base . $endpoint . '/p/' . $token . '/') ?></code><code><?= $e($endpoint) ?>/p/<?= $e(substr($token, 0, 6)) ?>…</code> <small class="muted"><?= $t('by {name}', ['name' => $p['by'] ?? '?']) ?></small></td>
       <td><?= $p['kind'] === 'live' ? $t('Live viewer') : $t('Preview') ?></td>
       <td><?= $time((int) $p['expires']) ?></td>
       <td class="cell-actions"><button class="btn" type="button" data-copy="<?= $e($id) ?>"><?= $t('Copy link') ?></button>

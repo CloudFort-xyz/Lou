@@ -5,7 +5,7 @@ DirectoryIndex index.html
 AddDefaultCharset utf-8
 ErrorDocument 404 /404.html
 
-# --- No PHP anywhere (/_lou/.htaccess re-allows Lou's own endpoints) -------
+# --- No PHP anywhere (the endpoint folder's .htaccess re-allows its stubs) 
 <FilesMatch "\.(php|phtml|phar|php\d)$">
     Require all denied
 </FilesMatch>

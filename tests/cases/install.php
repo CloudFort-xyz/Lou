@@ -344,7 +344,9 @@ test('installer: needs the setup key, builds the site, creates the admin last an
     $key = $i->key();
     $r = $i->install(install_form($i, ['key' => strtolower(str_replace('-', ' ', $key))]), null, "$root/public");
     check($r['site'] === 'https://www.pelda.hu', 'address normalised');
-    check(is_file("$root/site/config.php") && is_file("$root/public/index.html") && is_file("$root/public/_lou/admin.php"), 'site seeded and built');
+    check(is_file("$root/site/config.php") && is_file("$root/public/index.html") && is_file("$root/public/_app/admin.php"), 'site seeded and built');
+    check(Fs::readJson("$root/var/settings.json")['endpoint_dir'] === '_app' && $r['endpoint'] === '/_app' && !is_dir("$root/public/_lou"),
+        'new installs put the endpoints in a neutral folder');
     check(!is_file("$root/public/install.php"), 'the build replaced the installer');
     check(glob("$root/var/builds/before-*") === [], 'the installer is not kept as a build to roll back to');
     check((new Users("$root/var/users.json"))->verify('bence', 'jelszo-12345') === 'admin', 'admin created');

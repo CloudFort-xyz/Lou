@@ -9,7 +9,7 @@ use Lou\Db\Database;
 use Lou\Http\Request;
 use Lou\Http\Response;
 
-/** Entry point used by public/_lou/mcp.php. */
+/** Entry point used by public/<endpoint_dir>/mcp.php. */
 final class Endpoint
 {
     public static function run(string $root): void

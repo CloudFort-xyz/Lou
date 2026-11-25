@@ -396,6 +396,25 @@ test('admin: settings saves base_url, rebuilds the sitemap with it, and is admin
     check($r->status === 403, "editor got {$r->status}");
 });
 
+test('admin: moving the endpoint folder rebuilds the site there and redirects to the new admin', function () {
+    [$admin, $session, $app, $db] = admin_setup();
+    (new Builder($app))->build();
+    check(is_file($app->outputDir() . '/_lou/admin.php'), 'old installs keep /_lou/ until moved');
+    $r = $admin->handle(admin_req('POST', 'endpoint-dir', ['endpoint_dir' => '../x']));
+    check($r->status >= 400, 'bad folder name refused');
+    $r = $admin->handle(admin_req('POST', 'endpoint-dir', ['endpoint_dir' => '_app']));
+    check($r->status === 303 && str_starts_with((string) $r->headers['Location'], '/_app/admin.php?r=settings'), (string) ($r->headers['Location'] ?? $r->body));
+    check(Fs::readJson($app->varDir . '/settings.json')['endpoint_dir'] === '_app', 'saved');
+    check(is_file($app->outputDir() . '/_app/admin.php') && !is_dir($app->outputDir() . '/_lou'), 'site rebuilt with the new folder only');
+    $fresh = new App($app->root);
+    $page = (new AdminApp($fresh, $db, $session))->handle(admin_req('GET', 'settings', [], ['headers' => ['accept' => 'text/html']]));
+    contains($page->body, 'href="/_app/admin.css"');
+    contains($page->body, 'action="/_app/admin.php?r=endpoint-dir"');
+
+    [$editor] = admin_setup('editor');
+    check($editor->handle(admin_req('POST', 'endpoint-dir', ['endpoint_dir' => 'zz']))->status === 403, 'admin-only');
+});
+
 test('admin: the dashboard is the start screen and the side menu follows the role', function () {
     [$admin, , $app, $db] = admin_setup();
     $db->run("INSERT INTO submissions (form, lang, data, status, created_at) VALUES ('contact', 'hu', ?, 'ok', ?)",

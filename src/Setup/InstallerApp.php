@@ -50,7 +50,7 @@ final class InstallerApp
         }
         if ($this->installer->installed()) {
             $this->removeScript();
-            return $this->page(404, 'done', ['already' => true, 'warnings' => [], 'site' => '']);
+            return $this->page(404, 'done', ['already' => true, 'warnings' => [], 'site' => '', 'endpoint' => (new \Lou\App($this->root))->endpoint()]);
         }
         if ($req->method === 'POST') {
             return $this->post($req);
@@ -86,7 +86,7 @@ final class InstallerApp
             return $this->form($req, $e->getMessage(), $req->post, 422);
         }
         $this->removeScript();
-        return $this->page(200, 'done', ['already' => false, 'warnings' => $r['warnings'], 'site' => $r['site']]);
+        return $this->page(200, 'done', ['already' => false, 'warnings' => $r['warnings'], 'site' => $r['site'], 'endpoint' => $r['endpoint']]);
     }
 
     /** @param array<string, mixed> $old values to show again (never passwords or the key) */
@@ -148,7 +148,7 @@ final class InstallerApp
             return (string) ob_get_clean();
         };
         // after installing, install.php may be gone, but the build has put the stylesheet in place
-        $css = $view === 'done' ? '/_lou/admin.css' : basename($this->script) . '?asset=admin.css';
+        $css = $view === 'done' ? $vars['endpoint'] . '/admin.css' : basename($this->script) . '?asset=admin.css';
         $body = $render(__DIR__ . "/views/$view.php", $vars);
         $html = "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
             . "<meta name=\"robots\" content=\"noindex, nofollow\">\n<title>Install Lou</title>\n<link rel=\"stylesheet\" href=\"" . $e($css) . "\">\n</head>\n"

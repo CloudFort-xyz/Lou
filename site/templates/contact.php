@@ -12,7 +12,7 @@
   <label class="check"><input type="checkbox" name="consent" value="1" required> <?= $v->t('form.consent') ?></label>
   <?= $v->captcha('contact') ?>
   <button class="button" type="submit"><?= $v->t('form.send') ?></button>
-  <p data-lou-status role="status" aria-live="polite"></p>
+  <p data-status role="status" aria-live="polite"></p>
 </form>
 <address class="contact-details">
   <?= $v->global('company') ?><br>

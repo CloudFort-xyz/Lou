@@ -50,7 +50,7 @@ Email (sender, SMTP server and password) is set by an admin under **Settings →
 ```
 lou            CLI
 src/           Lou core (namespace Lou\)
-stubs/         copied into every build (.htaccess, /_lou/ endpoints)
+stubs/         copied into every build (.htaccess, endpoint stubs into endpoint_dir: _app for web installs, else _lou)
 site/          the site: config, menu, redirects, content/, templates/, assets/
 var/           runtime data, gitignored (database, builds, backups, staging)
 public/        build output = web root, gitignored

@@ -11,7 +11,7 @@ use Lou\Http\Request;
 use Lou\Http\Response;
 use Lou\Integrations;
 
-/** Entry point used by public/_lou/submit.php. */
+/** Entry point used by public/<endpoint_dir>/submit.php. */
 final class Endpoint
 {
     public static function run(string $root): void

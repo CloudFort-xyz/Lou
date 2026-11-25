@@ -12,7 +12,7 @@ use Lou\Support\Fs;
 use Lou\View;
 
 /**
- * Preview builds as static files at secret URLs: /_lou/p/<token>/. They need no PHP to view, never get
+ * Preview builds as static files at secret URLs: /<endpoint_dir>/p/<token>/. They need no PHP to view, never get
  * indexed, and survive publishing. Each shows a source: a person's draft, staging, or site/. Kinds:
  *   - "editor":  a person's inline-editing preview of their draft (editor script injected), rotated daily
  *   - "share":   a read-only link to show the client, expires after N days, revocable
@@ -30,12 +30,12 @@ final class Previews
 
     public function baseDir(): string
     {
-        return $this->app->outputDir() . '/_lou/p';
+        return $this->app->outputDir() . $this->app->endpoint('p');
     }
 
-    public static function urlPrefix(string $token): string
+    public static function urlPrefix(App $app, string $token): string
     {
-        return '/_lou/p/' . $token;
+        return $app->endpoint('p/' . $token);
     }
 
     /** @return array<string, array{kind: string, created: string, expires: int, by: ?string}> */
@@ -107,7 +107,7 @@ final class Previews
         } catch (LouException) {
             return null; // "Build preview" on Review shows the error
         }
-        $s->recordPreview(rtrim($siteUrl, '/') . self::urlPrefix($p['token']) . '/', $p['result']);
+        $s->recordPreview(rtrim($siteUrl, '/') . self::urlPrefix($this->app, $p['token']) . '/', $p['result']);
         return $p;
     }
 
@@ -183,13 +183,13 @@ final class Previews
     {
         $editor = $entry['kind'] === 'editor';
         $inject = match ($entry['kind']) {
-            'editor' => '<link rel="stylesheet" href="/_lou/editor.css"><script src="/_lou/editor.js" defer data-page="{page}" data-lang="{lang}"></script>',
+            'editor' => '<link rel="stylesheet" href="' . $this->app->endpoint('editor.css') . '"><script src="' . $this->app->endpoint('editor.js') . '" defer data-page="{page}" data-lang="{lang}"></script>',
             // live viewer: polls version.json (a static file rewritten on every rebuild) and reloads on change
-            'live'   => '<script src="/_lou/viewer.js" defer data-version="' . self::urlPrefix($token) . '/version.json"></script>',
+            'live'   => '<script src="' . $this->app->endpoint('viewer.js') . '" defer data-version="' . self::urlPrefix($this->app, $token) . '/version.json"></script>',
             default  => '',
         };
         $source = $this->sourceApp((string) ($entry['source'] ?? 'site'));
-        $result = (new Builder($source))->build($editor ? View::MODE_EDIT : View::MODE_PREVIEW, $this->baseDir() . '/' . $token, self::urlPrefix($token), $inject);
+        $result = (new Builder($source))->build($editor ? View::MODE_EDIT : View::MODE_PREVIEW, $this->baseDir() . '/' . $token, self::urlPrefix($this->app, $token), $inject);
         if (!is_file($this->baseDir() . '/.htaccess')) {
             Fs::write($this->baseDir() . '/.htaccess', "Options -Indexes\n<IfModule mod_headers.c>\n    Header always set X-Robots-Tag \"noindex, nofollow\"\n</IfModule>\n");
         }

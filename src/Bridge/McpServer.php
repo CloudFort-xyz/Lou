@@ -11,12 +11,12 @@ use Lou\Http\Response;
 use Lou\LouException;
 
 /**
- * /_lou/mcp.php: the Model Context Protocol (Streamable HTTP transport, plain JSON responses, no SSE)
+ * /<endpoint_dir>/mcp.php: the Model Context Protocol (Streamable HTTP transport, plain JSON responses, no SSE)
  * plus a REST fallback for clients without MCP:
  *
- *   POST /_lou/mcp.php                 JSON-RPC 2.0 (initialize, tools/list, tools/call, ping)
- *   POST /_lou/mcp.php?tool=read_file  {"path": "..."} → {"ok": true, "result": ...}
- *   GET  /_lou/mcp.php?openapi         OpenAPI 3.1 description of the REST fallback
+ *   POST mcp.php                       JSON-RPC 2.0 (initialize, tools/list, tools/call, ping)
+ *   POST mcp.php?tool=read_file        {"path": "..."} → {"ok": true, "result": ...}
+ *   GET  mcp.php?openapi               OpenAPI 3.1 description of the REST fallback
  *
  * Every request except ?openapi needs "Authorization: Bearer lou_…" (or ?key=lou_… for clients that
  * cannot send headers). Tokens are created in the admin (Assistants) or with `php lou token add`.
@@ -59,7 +59,7 @@ final class McpServer
         if ($caller === null) {
             $this->hit($ipKey);
             return new Response(401, (string) json_encode(['error' => 'A valid bridge token is required']), [
-                'Content-Type' => 'application/json', 'WWW-Authenticate' => 'Bearer realm="lou"']);
+                'Content-Type' => 'application/json', 'WWW-Authenticate' => 'Bearer realm="api"']);
         }
         $caller = 'llm:' . $caller;
 
@@ -181,7 +181,7 @@ final class McpServer
     {
         $paths = [];
         foreach (Tools::definitions() as $t) {
-            $paths['/_lou/mcp.php?tool=' . $t['name']] = ['post' => [
+            $paths[$this->app->endpoint('mcp.php') . '?tool=' . $t['name']] = ['post' => [
                 'operationId' => $t['name'],
                 'summary' => $t['description'],
                 'requestBody' => ['required' => true, 'content' => ['application/json' => ['schema' => $t['inputSchema']]]],
@@ -194,7 +194,7 @@ final class McpServer
         }
         return [
             'openapi' => '3.1.0',
-            'info' => ['title' => 'Lou bridge: ' . $this->app->config['name'], 'version' => App::VERSION,
+            'info' => ['title' => 'Site bridge: ' . $this->app->config['name'], 'version' => '1',
                 'description' => 'Call describe_site first. All changes are staged until a human approves them.'],
             'servers' => [['url' => $this->siteUrl ?: $this->app->siteUrl()]],
             'components' => ['securitySchemes' => ['bearer' => ['type' => 'http', 'scheme' => 'bearer']]],

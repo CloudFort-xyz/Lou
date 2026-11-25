@@ -291,7 +291,7 @@ test('forms: build wires the endpoint stub, forms.js and form fields', function 
     $contact = file_get_contents("$root/public/kapcsolat/index.html");
     contains($contact, 'name="form" value="contact"');
     contains($contact, 'name="lang" value="hu"');
-    contains($contact, 'data-lou-form');
+    contains($contact, 'action="/_lou/submit.php" data-form');
     contains($contact, '<script src="/_lou/forms.js" defer></script>');
 
     file_put_contents("$root/site/templates/page.php", '<?php $v->layout("layout") ?><?= $v->formFields("missing") ?>');
@@ -301,6 +301,49 @@ test('forms: build wires the endpoint stub, forms.js and form fields', function 
     } catch (LouException $e) {
         contains($e->getMessage(), "unknown form 'missing'");
     }
+});
+
+test('fingerprints: the endpoint folder is a setting, and public pages and forms.js do not name Lou', function () {
+    $root = install();
+    Fs::writeJson("$root/var/settings.json", ['endpoint_dir' => 'x-api']);
+    $app = new App($root);
+    check($app->endpoint('admin.php') === '/x-api/admin.php', 'endpoint path');
+    (new Builder($app))->build();
+    check(is_file("$root/public/x-api/submit.php") && is_file("$root/public/x-api/forms.js") && !is_dir("$root/public/_lou"), 'stubs in the set folder');
+    $contact = file_get_contents("$root/public/kapcsolat/index.html");
+    contains($contact, 'action="/x-api/submit.php" data-form');
+    contains($contact, '<script src="/x-api/forms.js" defer></script>');
+    contains($contact, '<div hidden><label>Website');
+    foreach (array_merge(glob("$root/public/*.html"), glob("$root/public/*/index.html"), ["$root/public/x-api/forms.js"]) as $f) {
+        check(stripos((string) file_get_contents($f), 'lou') === false, basename(dirname($f)) . '/' . basename($f) . ' names Lou');
+    }
+
+    // site/config.php (or an assistant's draft of it) can't move the endpoints
+    file_put_contents("$root/site/config.php", str_replace('return [', "return [\n    'endpoint_dir' => 'elsewhere',", (string) file_get_contents("$root/site/config.php")));
+    check((new App($root))->endpoint() === '/x-api', 'only var/settings.json sets endpoint_dir');
+
+    foreach (['', '.x', '-x', 'A_B', 'assets', 'a/b', str_repeat('a', 41)] as $bad) {
+        check(!App::validEndpointDir($bad), "'$bad' must be refused");
+    }
+    Fs::writeJson("$root/var/settings.json", ['endpoint_dir' => '../x']);
+    try {
+        new App($root);
+        check(false, 'a bad endpoint_dir must be refused');
+    } catch (LouException) {
+    }
+
+    // a page inside the endpoint folder is refused; old Lou form names in the site get a warning
+    Fs::writeJson("$root/var/settings.json", ['endpoint_dir' => 'kapcsolat']);
+    try {
+        (new Builder(new App($root)))->build();
+        check(false, 'a page inside the endpoint folder must fail the build');
+    } catch (LouException $e) {
+        contains($e->getMessage(), 'inside the endpoint folder');
+    }
+    Fs::writeJson("$root/var/settings.json", []);
+    file_put_contents("$root/site/assets/css/site.css", ".lou-hp{display:none}\n", FILE_APPEND);
+    $r = (new Builder(new App($root)))->build();
+    contains(implode("\n", $r['warnings']), 'Old Lou form names in assets/css/site.css');
 });
 
 test('forms: captcha widget needs a site key', function () {

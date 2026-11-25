@@ -192,8 +192,8 @@ final class View
     // ------------------------------------------------------------ forms
 
     /**
-     * Hidden fields every Lou form needs (form id, language, token slot, honeypot).
-     * Use inside <form method="post" action="/_lou/submit.php" data-lou-form>.
+     * Hidden fields every form needs (form id, language, token slot, honeypot). Use inside <form{formAttrs}>.
+     * The honeypot is hidden with the hidden attribute, so it needs no CSS.
      */
     public function formFields(string $formId): string
     {
@@ -204,7 +204,7 @@ final class View
         return '<input type="hidden" name="form" value="' . Html::escape($formId) . '">'
             . '<input type="hidden" name="lang" value="' . Html::escape($this->page->lang) . '">'
             . '<input type="hidden" name="_token" value="">'
-            . '<div class="lou-hp" aria-hidden="true"><label>Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>';
+            . '<div hidden><label>Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>';
     }
 
     /** Captcha widget for the form, if one is configured for it. Prints nothing otherwise. */
@@ -231,10 +231,10 @@ final class View
     /** Attributes for the <form> tag: method, action and data hooks for forms.js. */
     public function formAttrs(string $formId): string
     {
-        $attrs = ' method="post" action="/_lou/submit.php" data-lou-form';
+        $attrs = ' method="post" action="' . Html::escape($this->site->app->endpoint('submit.php')) . '" data-form';
         $type = $this->site->app->config['forms'][$formId]['captcha'] ?? null;
         if ($type === 'recaptcha') {
-            $attrs .= ' data-lou-recaptcha="' . Html::escape((string) Arr::get($this->site->app->config, 'captcha.recaptcha.site_key', '')) . '"';
+            $attrs .= ' data-recaptcha="' . Html::escape((string) Arr::get($this->site->app->config, 'captcha.recaptcha.site_key', '')) . '"';
         }
         return $attrs;
     }
@@ -242,7 +242,7 @@ final class View
     /** Script tags needed by the page (only pages with forms load forms.js). Call at the end of the layout. */
     public function scripts(): string
     {
-        return $this->needsFormsJs ? '<script src="/_lou/forms.js" defer></script>' : '';
+        return $this->needsFormsJs ? '<script src="' . Html::escape($this->site->app->endpoint('forms.js')) . '" defer></script>' : '';
     }
 
     // ------------------------------------------------------------ site-wide

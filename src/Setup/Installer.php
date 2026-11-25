@@ -118,7 +118,7 @@ final class Installer
      * @param array<string, string> $in        the installer form
      * @param string|null           $siteZip   an uploaded site zip (starter = upload)
      * @param string                $docroot   the folder the installer was served from
-     * @return array{warnings: list<string>, output: string, site: string}
+     * @return array{warnings: list<string>, output: string, site: string, endpoint: string}
      */
     public function install(array $in, ?string $siteZip, string $docroot): array
     {
@@ -172,6 +172,7 @@ final class Installer
             $settings = is_file($settingsFile) ? Fs::readJson($settingsFile) : [];
             $settings['base_url'] = $baseUrl;
             $settings['mail'] = $mail['mail'];
+            $settings['endpoint_dir'] ??= App::NEUTRAL_ENDPOINT_DIR;
             if ($this->buildsIntoDocroot($docroot)) {
                 $settings['output_dir'] = (string) realpath($docroot);
                 $settings['output_swap'] = Output::CONTENTS;
@@ -203,6 +204,6 @@ final class Installer
         (new Users($this->root . '/var/users.json'))->add($user, $get('admin_password'), 'admin');
         @unlink($this->keyFile());
         Fs::writeJson($this->root . '/var/installed.json', ['lou' => App::VERSION, 'at' => gmdate('c'), 'by' => strtolower($user)]);
-        return ['warnings' => $build['warnings'], 'output' => $build['output'], 'site' => $baseUrl];
+        return ['warnings' => $build['warnings'], 'output' => $build['output'], 'site' => $baseUrl, 'endpoint' => $app->endpoint()];
     }
 }
