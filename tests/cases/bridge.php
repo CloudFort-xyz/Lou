@@ -6,7 +6,7 @@ use Lou\Admin\Previews;
 use Lou\App;
 use Lou\Bridge\McpServer;
 use Lou\Bridge\PathPolicy;
-use Lou\Bridge\Staging;
+use Lou\Content\Workspace;
 use Lou\Bridge\TemplateGuard;
 use Lou\Bridge\Tokens;
 use Lou\Bridge\Tools;
@@ -131,7 +131,12 @@ test('bridge: MCP initialize, tools/list, batches, notifications and errors', fu
     check($r['isError'] === true, 'tool errors are results with isError');
 });
 
-test('bridge: assistant edits staging, previews, submits; approve applies and publishes', function () {
+function editor_admin(App $app, Database $db, string $user = 'bence', string $role = 'admin'): Lou\Admin\AdminApp
+{
+    return new Lou\Admin\AdminApp($app, $db, new Lou\Admin\ArraySession(['user' => $user, 'role' => $role, 'started' => time(), 'seen' => time(), 'csrf' => 'tok']));
+}
+
+test('bridge: assistant edits its draft, previews, submits to staging; publishing makes it live', function () {
     [$mcp, $token, $app, $db] = bridge_setup();
     $info = json_decode(call_tool($mcp, $token, 'describe_site')['content'][0]['text'], true);
     check($info['languages'] === ['hu', 'en'] && str_contains($info['guide'], 'write_file'), 'describe_site');
@@ -139,104 +144,68 @@ test('bridge: assistant edits staging, previews, submits; approve applies and pu
     $css = call_tool($mcp, $token, 'read_file', ['path' => 'assets/css/site.css'])['content'][0]['text'];
     $r = call_tool($mcp, $token, 'write_file', ['path' => 'assets/css/site.css', 'content' => $css . "\n.lou-test{color:red}\n"]);
     check($r['isError'] === false, 'write css: ' . $r['content'][0]['text']);
-    editJson($app->root . '/var/staging/site/content/pages/about/hu.json', fn ($d) => ['slug' => 'cegunkrol'] + $d);
+    $about = json_decode(call_tool($mcp, $token, 'read_file', ['path' => 'content/pages/about/hu.json'])['content'][0]['text'], true);
+    call_tool($mcp, $token, 'write_file', ['path' => 'content/pages/about/hu.json', 'content' => json_encode(['slug' => 'cegunkrol'] + $about, JSON_UNESCAPED_UNICODE)]);
     $r = call_tool($mcp, $token, 'write_file', ['path' => 'templates/page.php', 'content' => '<?php system("id") ?>']);
     check($r['isError'] === true && str_contains($r['content'][0]['text'], 'system'), 'unsafe template refused');
 
-    check(!str_contains(file_get_contents($app->siteDir . '/assets/css/site.css'), 'lou-test'), 'site/ untouched while staged');
-    check(!str_contains(file_get_contents($app->outputDir() . '/assets/css/site.css'), 'lou-test'), 'live untouched while staged');
+    check(!Workspace::staging($app)->exists(), 'nothing on staging before submitting');
+    check(!str_contains(file_get_contents($app->siteDir . '/assets/css/site.css'), 'lou-test'), 'site/ untouched');
 
     $p = json_decode(call_tool($mcp, $token, 'build_preview')['content'][0]['text'], true);
     check($p['ok'] === true && str_contains($p['url'], '/_lou/p/'), 'preview url');
     check($p['redirects']['moved'][0]['from'] === '/rolunk/', 'redirect report in the preview');
-    $dir = $app->outputDir() . parse_url($p['url'], PHP_URL_PATH);
-    check(is_file($dir . 'cegunkrol/index.html'), 'preview built from staging');
+    check(is_file($app->outputDir() . parse_url($p['url'], PHP_URL_PATH) . 'cegunkrol/index.html'), 'preview built from the draft');
+
+    // a person's draft doesn't see the assistant's unsubmitted work
+    $admin = editor_admin($app, $db);
+    check(!str_contains(file_get_contents(Workspace::draft($app, 'user:bence')->app()->siteDir . '/assets/css/site.css'), 'lou-test'), 'drafts are private');
 
     $changes = json_decode(call_tool($mcp, $token, 'get_changes')['content'][0]['text'], true);
     check(count($changes['files']['modified']) === 2 && str_contains($changes['diffs']['assets/css/site.css'], '+.lou-test'), 'changes + diff');
+    check(call_tool($mcp, $token, 'submit_for_review', ['summary' => ''])['isError'] === true, 'summary required');
     $r = call_tool($mcp, $token, 'submit_for_review', ['summary' => 'Red test class, shorter slug']);
-    check($r['isError'] === false && (new Staging($app))->meta()['status'] === 'review', 'submitted');
+    check($r['isError'] === false, 'submit: ' . $r['content'][0]['text']);
+    $staging = Workspace::staging($app);
+    check($staging->changedFiles() === ['assets/css/site.css', 'content/pages/about/hu.json'], 'on staging: ' . implode(',', $staging->changedFiles()));
+    check(!Workspace::draft($app, 'llm:Claude test')->exists(), 'assistant draft emptied');
+    check(str_contains(file_get_contents(Workspace::draft($app, 'user:bence')->app()->siteDir . '/assets/css/site.css'), 'lou-test'), 'drafts see staging');
 
-    // the review screen
-    [$admin] = [new Lou\Admin\AdminApp($app, $db, new Lou\Admin\ArraySession(['user' => 'bence', 'role' => 'admin', 'started' => time(), 'seen' => time(), 'csrf' => 'tok']))];
-    $html = $admin->handle(admin_req('GET', 'changes', [], ['headers' => ['accept' => 'text/html']]))->body;
+    // review + publish (an editor may publish)
+    $editor = editor_admin($app, $db, 'kliens', 'editor');
+    $html = $editor->handle(admin_req('GET', 'review', [], ['headers' => ['accept' => 'text/html']]))->body;
     contains($html, 'Red test class');
-    contains($html, '/rolunk/');
+    contains($html, 'Claude test (assistant)');
     contains($html, 'assets/css/site.css');
+    $editor->handle(admin_req('POST', 'review-preview'));
+    contains($editor->handle(admin_req('GET', 'review', [], ['headers' => ['accept' => 'text/html']]))->body, '/rolunk/');
 
-    $r = $admin->handle(admin_req('POST', 'approve', ['id' => 'stale'], ['headers' => ['accept' => 'text/html']]));
+    $r = $editor->handle(admin_req('POST', 'publish', ['rev' => 'stale'], ['headers' => ['accept' => 'text/html']]));
     contains($r->body, 'changed while you were reviewing');
-    $r = $admin->handle(admin_req('POST', 'approve', ['id' => (new Staging($app))->meta()['id']], ['headers' => ['accept' => 'text/html']]));
-    check($r->status === 200, 'approve: ' . strip_tags($r->body));
+    $r = $editor->handle(admin_req('POST', 'publish', ['rev' => (string) $staging->meta()['rev']], ['headers' => ['accept' => 'text/html']]));
+    check($r->status === 200, 'publish: ' . strip_tags($r->body));
     check(str_contains(file_get_contents($app->siteDir . '/assets/css/site.css'), 'lou-test'), 'applied to site/');
     check(is_file($app->outputDir() . '/cegunkrol/index.html'), 'published');
     contains(file_get_contents($app->outputDir() . '/.htaccess'), '"^/rolunk/?$" "/cegunkrol/"');
-    check(!(new Staging($app))->exists(), 'staging cleared');
-    check(!array_filter((new Previews($app))->all(), fn ($p) => $p['kind'] === 'changeset'), 'changeset preview revoked');
+    check(!Workspace::staging($app)->exists(), 'staging cleared');
     check(count(glob($app->varDir . '/backups/*.zip')) === 1, 'safety backup made');
     $log = $db->run("SELECT COUNT(*) FROM audit_log WHERE source = 'llm' AND actor = 'llm:Claude test'")->fetchColumn();
     check($log >= 2, 'assistant writes are audit-logged');
 });
 
-test('bridge: admin edits made meanwhile are kept; same-file edits conflict', function () {
+test('bridge: invalid drafts cannot be previewed or submitted', function () {
     [$mcp, $token, $app] = bridge_setup();
-    $s = new Staging($app);
-    $s->write('content/pages/about/en.json', json_encode(['title' => 'About (LLM)'] + Fs::readJson($app->siteDir . '/content/pages/about/en.json')), 'llm:t');
-    // meanwhile in the admin: a different file, and a build that adds an automatic redirect
-    editJson($app->siteDir . '/content/pages/contact/hu.json', fn ($d) => ['title' => 'Kapcsolat (admin)'] + $d);
-    Fs::writeJson($app->siteDir . '/redirects.json', [['from' => '/regi/', 'to' => ['page' => 'home', 'lang' => 'hu'], 'status' => 301]]);
-    check($s->conflicts() === [], 'no conflict for different files');
-    $s->apply();
-    check(Fs::readJson($app->siteDir . '/content/pages/contact/hu.json')['title'] === 'Kapcsolat (admin)', 'admin edit kept');
-    check(Fs::readJson($app->siteDir . '/content/pages/about/en.json')['title'] === 'About (LLM)', 'LLM edit applied');
-
-    $s->write('content/pages/about/en.json', json_encode(['title' => 'Again'] + Fs::readJson($app->siteDir . '/content/pages/about/en.json')), 'llm:t');
-    $s->write('redirects.json', json_encode([['from' => '/kampany/', 'to' => '/en/', 'status' => 301]]), 'llm:t');
-    editJson($app->siteDir . '/content/pages/about/en.json', fn ($d) => ['title' => 'Admin wins?'] + $d);
-    check($s->conflicts() === ['content/pages/about/en.json'], 'conflict detected');
-    try {
-        $s->apply();
-        check(false, 'conflict must block apply');
-    } catch (LouException $e) {
-        contains($e->getMessage(), 'about/en.json');
-    }
-    $s->apply(true);
-    check(Fs::readJson($app->siteDir . '/content/pages/about/en.json')['title'] === 'Again', 'force applies');
-    // redirects: the LLM removed /regi/ (present in base) and added /kampany/
-    $froms = array_column(Fs::readJson($app->siteDir . '/redirects.json'), 'from');
-    check($froms === ['/kampany/'], 'redirects merged: ' . implode(',', $froms));
-});
-
-test('bridge: redirects added live meanwhile survive an LLM redirect change', function () {
-    [, , $app] = bridge_setup();
-    $s = new Staging($app);
-    $s->write('redirects.json', json_encode([['from' => '/kampany/', 'to' => '/en/', 'status' => 301]]), 'llm:t');
-    Fs::writeJson($app->siteDir . '/redirects.json', [['from' => '/auto/', 'to' => ['page' => 'home', 'lang' => 'hu'], 'status' => 301]]);
-    $s->apply();
-    check(array_column(Fs::readJson($app->siteDir . '/redirects.json'), 'from') === ['/auto/', '/kampany/'], 'both kept');
-});
-
-test('bridge: invalid staged sites cannot be previewed or approved; reject discards', function () {
-    [$mcp, $token, $app, $db] = bridge_setup();
     call_tool($mcp, $token, 'write_file', ['path' => 'menu.json', 'content' => '["home", "nope"]']);
     $p = json_decode(call_tool($mcp, $token, 'build_preview')['content'][0]['text'], true);
     check($p['ok'] === false && str_contains(implode(' ', $p['problems']), 'nope'), 'preview reports problems');
     check(call_tool($mcp, $token, 'submit_for_review', ['summary' => 'x'])['isError'] === true, 'cannot submit');
-    try {
-        (new Staging($app))->apply();
-        check(false, 'apply must fail');
-    } catch (LouException) {
-    }
+    check(!Workspace::staging($app)->exists(), 'nothing staged');
     check(call_tool($mcp, $token, 'delete_file', ['path' => 'config.php'])['isError'] === true, 'config.php cannot be deleted');
-
-    [$admin] = admin_setup();
-    $admin = new Lou\Admin\AdminApp($app, $db, new Lou\Admin\ArraySession(['user' => 'bence', 'role' => 'admin', 'started' => time(), 'seen' => time(), 'csrf' => 'tok']));
-    $admin->handle(admin_req('POST', 'reject', [], ['headers' => ['accept' => 'text/html']]));
-    check(!(new Staging($app))->exists(), 'rejected');
-    check(Fs::readJson($app->siteDir . '/menu.json') !== ['home', 'nope'], 'site untouched');
+    call_tool($mcp, $token, 'discard_changes');
+    check(!Workspace::draft($app, 'llm:Claude test')->exists(), 'discarded');
 });
 
-test('bridge: images are re-encoded into staging', function () {
+test('bridge: images are re-encoded into the draft', function () {
     [$mcp, $token, $app] = bridge_setup();
     $img = imagecreatetruecolor(40, 20);
     ob_start();
@@ -245,7 +214,7 @@ test('bridge: images are re-encoded into staging', function () {
     $r = call_tool($mcp, $token, 'upload_image', ['filename' => 'Logó.png', 'data_base64' => base64_encode($png)]);
     check($r['isError'] === false, 'upload: ' . $r['content'][0]['text']);
     $res = json_decode($r['content'][0]['text'], true);
-    check(str_ends_with($res['src'], '.webp') && is_file($app->root . '/var/staging/site/' . ltrim(str_replace('/assets/', 'assets/', $res['src']), '/')), 'webp in staging: ' . $res['src']);
+    check(str_ends_with($res['src'], '.webp') && is_file(Workspace::draft($app, 'llm:Claude test')->siteDir() . $res['src']), 'webp in the draft: ' . $res['src']);
     check(call_tool($mcp, $token, 'upload_image', ['filename' => 'x.png', 'data_base64' => base64_encode('<?php x')])['isError'] === true, 'non-image refused');
 });
 
@@ -274,7 +243,7 @@ test('bridge: assistants screen creates a token once and revokes it; live build 
     check((new Tokens($app->varDir . '/tokens.json'))->verify($m[0]) === null, 'revoked');
 
     [$editor] = admin_setup('editor');
-    check($editor->handle(admin_req('GET', 'changes'))->status === 403, 'editors cannot review LLM changes');
+    check($editor->handle(admin_req('GET', 'review'))->status === 200, 'editors can review and publish');
     check($editor->handle(admin_req('GET', 'assistants'))->status === 403, 'editors cannot manage tokens');
 
     $stub = (string) file_get_contents($app->outputDir() . '/_lou/mcp.php');
@@ -282,24 +251,3 @@ test('bridge: assistants screen creates a token once and revokes it; live build 
     check(!str_contains($stub, '__LOU_ROOT__'), 'root substituted');
 });
 
-test('bridge: approved changesets are committed to Git when enabled', function () {
-    if (trim((string) shell_exec('command -v git')) === '') {
-        return; // no git on this machine
-    }
-    $root = install();
-    file_put_contents("$root/site/config.php", str_replace("'base_url'", "'git' => ['commit' => true],\n    'base_url'", file_get_contents("$root/site/config.php")));
-    $git = fn (string ...$a) => trim((string) shell_exec('git -C ' . escapeshellarg($root) . ' ' . implode(' ', array_map('escapeshellarg', $a)) . ' 2>&1'));
-    $git('init', '-q');
-    $git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', 'site');
-    $git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
-    $app = new App($root);
-    (new Builder($app))->build();
-    $db = new Database($app->databaseFile());
-    (new Staging($app))->write('assets/css/site.css', "body{color:#123}\n", 'llm:Claude');
-    (new Staging($app))->submit('Darker text');
-    $admin = new Lou\Admin\AdminApp($app, $db, new Lou\Admin\ArraySession(['user' => 'bence', 'role' => 'admin', 'started' => time(), 'seen' => time(), 'csrf' => 'tok']));
-    $r = $admin->handle(admin_req('POST', 'approve', ['id' => (new Staging($app))->meta()['id']], ['headers' => ['accept' => 'text/html']]));
-    contains($r->body, 'Committed to Git');
-    contains($git('log', '-1', '--format=%s|%an'), 'Darker text|bence');
-    check($git('status', '--porcelain', '--', 'site') === '', 'site/ is clean after the commit');
-});

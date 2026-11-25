@@ -55,7 +55,7 @@
 
   function done(res, path) {
     if (res.ok) {
-      say(res.unpublished ? 'Saved. You have unpublished changes.' : 'Saved.');
+      say(res.draft ? 'Saved to your draft.' : 'Saved.');
       reloadPreview(path);
     } else {
       say(res.message || 'Saving failed', true);

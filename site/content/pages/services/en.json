@@ -1,10 +1,13 @@
 {
-  "slug": "services",
-  "title": "Services",
-  "description": "An overview of our services.",
-  "template": "page",
-  "fields": {
-    "hero": { "title": "Services", "text": "How we can help." },
-    "body": "<ul><li>Consulting</li><li>Development</li><li>Operations</li></ul>"
-  }
+    "slug": "services",
+    "title": "Services",
+    "description": "An overview of our services.",
+    "template": "page",
+    "fields": {
+        "hero": {
+            "title": "Services",
+            "text": "How we can help."
+        },
+        "body": "<ul><li>Consulting</li><li>Development</li><li>Operations</li></ul>"
+    }
 }

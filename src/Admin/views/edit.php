@@ -23,12 +23,9 @@
       <?php endif ?>
       <button class="btn" type="submit">Save settings</button>
     </form>
-    <h2>Publish</h2>
-    <p id="status" class="muted" role="status" aria-live="polite"><?= $unpublished ? 'You have unpublished changes.' : 'Everything is published.' ?></p>
-    <form method="post" action="<?= $self ?>?r=publish">
-      <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
-      <button class="btn btn-primary" type="submit" id="publish">Publish changes</button>
-    </form>
+    <h2>Your draft</h2>
+    <p id="status" class="muted" role="status" aria-live="polite"><?= $drafted ? 'Your changes are saved in your draft. Nobody else sees them until you submit.' : 'No changes yet. Edits are saved to your own draft.' ?></p>
+    <p><a class="btn btn-primary" href="<?= $self ?>?r=review">Review and submit</a></p>
     <p><button class="btn btn-link" type="button" id="share">Create a shareable preview link</button></p>
     <p id="share-result" class="muted"></p>
     <h2>How to edit</h2>

@@ -5,7 +5,7 @@ $mcp = $base . '/_lou/mcp.php';
 $tok = $newToken ?? 'lou_YOUR_TOKEN';
 ?>
 <h1>Assistants</h1>
-<p class="muted">Assistants (Claude, ChatGPT, or anything that speaks MCP or plain HTTP) can change the layout, design, menu and content through the bridge. Their changes are staged and only go live when you approve them on the <a href="<?= $self ?>?r=changes">Changes</a> page.</p>
+<p class="muted">Assistants (Claude, ChatGPT, or anything that speaks MCP or plain HTTP) can change the layout, design, menu and content through the bridge. Each assistant works in its own draft. When it submits, its changes land on staging and go live once someone publishes them on the <a href="<?= $self ?>?r=review">Review</a> page.</p>
 
 <?php if ($newToken): ?>
   <div class="alert alert-ok">

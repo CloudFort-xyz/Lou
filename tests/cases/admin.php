@@ -37,6 +37,20 @@ function admin_req(string $method, string $route, array $post = [], array $extra
     return new Request($method, ['r' => $route] + ($extra['query'] ?? []), $post, $headers, '203.0.113.9', 0, $files);
 }
 
+/** Where a user's draft lives (edits land there, not in site/). */
+function draft_site(App $app, string $user = 'bence'): string
+{
+    return \Lou\Content\Workspace::draft($app, "user:$user")->siteDir();
+}
+
+/** Submit the user's draft to staging and publish it. */
+function submit_and_publish(\Lou\Admin\AdminApp $admin, App $app, string $summary = ''): \Lou\Http\Response
+{
+    $admin->handle(admin_req('POST', 'submit', ['summary' => $summary]));
+    $rev = (string) (\Lou\Content\Workspace::staging($app)->exists() ? \Lou\Content\Workspace::staging($app)->meta()['rev'] : '');
+    return $admin->handle(admin_req('POST', 'publish', ['rev' => $rev], ['headers' => ['accept' => 'text/html']]));
+}
+
 function body(\Lou\Http\Response $r): array
 {
     return json_decode($r->body, true) ?? [];
@@ -83,21 +97,22 @@ test('admin: sessions expire after inactivity', function () {
 test('admin: saving text and rich text updates content and the editor preview', function () {
     [$admin, , $app] = admin_setup();
     $r = $admin->handle(admin_req('POST', 'save', ['page' => 'about', 'lang' => 'hu', 'field' => 'hero.title', 'type' => 'text', 'value' => "Új <b>cím</b>\n"]));
-    check($r->status === 200 && body($r)['ok'] && body($r)['unpublished'] === true, $r->body);
-    $data = Fs::readJson("{$app->siteDir}/content/pages/about/hu.json");
+    check($r->status === 200 && body($r)['ok'] && body($r)['draft'] === true, $r->body);
+    $data = Fs::readJson(draft_site($app) . "/content/pages/about/hu.json");
     check($data['fields']['hero']['title'] === 'Új cím', 'tags stripped: ' . $data['fields']['hero']['title']);
 
     $admin->handle(admin_req('POST', 'save', ['page' => 'about', 'lang' => 'hu', 'field' => 'body', 'type' => 'html', 'value' => '<p onclick="x()">Hi <script>alert(1)</script><strong>ok</strong></p>']));
-    $body = Fs::readJson("{$app->siteDir}/content/pages/about/hu.json")['fields']['body'];
+    $body = Fs::readJson(draft_site($app) . "/content/pages/about/hu.json")['fields']['body'];
     check($body === '<p>Hi <strong>ok</strong></p>', "sanitised: $body");
 
-    $token = (new Previews($app))->editor();
+    $token = (new Previews($app))->editor('user:bence');
     $html = file_get_contents($app->outputDir() . "/_lou/p/$token/rolunk/index.html");
     contains($html, 'Új cím', 'editor preview rebuilt');
     contains($html, '/_lou/editor.js');
     contains($html, 'data-page="about" data-lang="hu"');
     contains($html, 'href="/_lou/p/' . $token . '/en/about-us/"', 'preview links stay inside the preview');
     check(!str_contains(file_get_contents($app->outputDir() . '/rolunk/index.html'), 'Új cím'), 'live site unchanged until publish');
+    check(!str_contains(file_get_contents("{$app->siteDir}/content/pages/about/hu.json"), 'Új cím'), 'site/ unchanged: edits stay in the draft');
 });
 
 test('admin: field writes are confined to the content structure', function () {
@@ -119,14 +134,14 @@ test('admin: page settings, slug changes only for admins, duplicates reverted', 
     [$admin, , $app] = admin_setup();
     $r = $admin->handle(admin_req('POST', 'meta', ['page' => 'about', 'lang' => 'hu', 'title' => 'Cégünk', 'menu_label' => 'Rólunk', 'slug' => 'cegunk']));
     check(body($r)['path'] === '/cegunk/', $r->body);
-    $before = file_get_contents("{$app->siteDir}/content/pages/about/hu.json");
+    $before = file_get_contents(draft_site($app) . "/content/pages/about/hu.json");
     $r = $admin->handle(admin_req('POST', 'meta', ['page' => 'about', 'lang' => 'hu', 'slug' => 'kapcsolat']));
     check($r->status === 422, 'duplicate URL must be rejected');
-    check(file_get_contents("{$app->siteDir}/content/pages/about/hu.json") === $before, 'file must be reverted');
+    check(file_get_contents(draft_site($app) . "/content/pages/about/hu.json") === $before, 'file must be reverted');
 
     [$editor, , $app2] = admin_setup('editor');
     $editor->handle(admin_req('POST', 'meta', ['page' => 'about', 'lang' => 'hu', 'title' => 'X', 'slug' => 'hacked']));
-    $d = Fs::readJson("{$app2->siteDir}/content/pages/about/hu.json");
+    $d = Fs::readJson(draft_site($app2, 'kliens') . "/content/pages/about/hu.json");
     check($d['title'] === 'X' && $d['slug'] === 'rolunk', 'editors may change the title but not the slug');
 });
 
@@ -138,10 +153,10 @@ test('admin: image upload is re-encoded, resized and stored as WebP', function (
     $r = $admin->handle(admin_req('POST', 'image', ['page' => 'home', 'lang' => 'en', 'field' => 'hero.image', 'alt' => 'Wide <b>image</b>'], [],
         ['file' => ['name' => 'Széles kép.PNG', 'tmp_name' => $src, 'error' => UPLOAD_ERR_OK, 'size' => filesize($src)]]));
     check($r->status === 200, $r->body);
-    $field = Fs::readJson("{$app->siteDir}/content/pages/home/en.json")['fields']['hero']['image'];
+    $field = Fs::readJson(draft_site($app) . "/content/pages/home/en.json")['fields']['hero']['image'];
     check(preg_match('#^/assets/uploads/\d{4}/szeles-kep-[a-f0-9]{8}\.webp$#', $field['src']) === 1, $field['src']);
     check($field['width'] === 1920 && $field['height'] === 640 && $field['alt'] === 'Wide image', json_encode($field));
-    check(getimagesize($app->siteDir . $field['src'])[2] === IMAGETYPE_WEBP, 'not a WebP');
+    check(getimagesize(draft_site($app) . $field['src'])[2] === IMAGETYPE_WEBP, 'not a WebP');
 
     $fake = sys_get_temp_dir() . '/lou-up-' . bin2hex(random_bytes(3)) . '.jpg';
     file_put_contents($fake, '<?php echo "pwned";');
@@ -151,7 +166,7 @@ test('admin: image upload is re-encoded, resized and stored as WebP', function (
 
     // alt text only
     $admin->handle(admin_req('POST', 'image', ['page' => 'home', 'lang' => 'en', 'field' => 'hero.image', 'alt' => 'New alt']));
-    $f2 = Fs::readJson("{$app->siteDir}/content/pages/home/en.json")['fields']['hero']['image'];
+    $f2 = Fs::readJson(draft_site($app) . "/content/pages/home/en.json")['fields']['hero']['image'];
     check($f2['alt'] === 'New alt' && $f2['src'] === $field['src'], 'alt-only update');
 });
 
@@ -165,8 +180,8 @@ test('admin: publish updates the live site, previews survive it, share links are
     check(!str_contains($shared, 'editor.js') && !str_contains($shared, 'data-lou-field'), 'share links must not include the editor');
     contains($shared, 'Publikált');
 
-    $r = $admin->handle(admin_req('POST', 'publish', [], ['headers' => ['accept' => 'text/html']]));
-    check($r->status === 200, 'publish failed');
+    $r = submit_and_publish($admin, $app, 'New title');
+    check($r->status === 200, 'publish failed: ' . strip_tags($r->body));
     contains(file_get_contents($app->outputDir() . '/rolunk/index.html'), 'Publikált');
     check(is_file($app->outputDir() . "/_lou/p/$token/rolunk/index.html"), 'previews must survive publishing');
     check($admin->unpublished() === false, 'nothing unpublished after publish');
@@ -175,7 +190,7 @@ test('admin: publish updates the live site, previews survive it, share links are
 test('admin: rollback puts the previous build back', function () {
     [$admin, , $app] = admin_setup();
     $admin->handle(admin_req('POST', 'save', ['page' => 'about', 'lang' => 'hu', 'field' => 'hero.title', 'type' => 'text', 'value' => 'Új verzió']));
-    $admin->handle(admin_req('POST', 'publish'));
+    submit_and_publish($admin, $app);
     contains(file_get_contents($app->outputDir() . '/rolunk/index.html'), 'Új verzió');
     $build = basename(glob($app->varDir . '/builds/before-*')[0]);
     $admin->handle(admin_req('POST', 'rollback', ['build' => $build]));
@@ -206,7 +221,7 @@ test('admin: submissions export, deletion and redirect management', function () 
 
 test('admin: every screen renders', function () {
     [$admin] = admin_setup();
-    foreach (['pages', 'submissions', 'subscribers', 'builds', 'backups', 'redirects', 'changes', 'assistants'] as $r) {
+    foreach (['pages', 'submissions', 'subscribers', 'builds', 'backups', 'redirects', 'review', 'history', 'assistants'] as $r) {
         $res = $admin->handle(admin_req('GET', $r, [], ['headers' => ['accept' => 'text/html']]));
         check($res->status === 200, "$r: {$res->status}");
         contains($res->headers['Content-Security-Policy'], "script-src 'self'");

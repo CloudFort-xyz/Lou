@@ -1,7 +1,12 @@
 {
-  "slug": "thank-you",
-  "title": "Thank you!",
-  "template": "page",
-  "sitemap": false,
-  "fields": { "hero": { "title": "Thank you!", "text": "We received your message and will reply soon." } }
+    "slug": "thank-you",
+    "title": "Thank you!",
+    "template": "page",
+    "sitemap": false,
+    "fields": {
+        "hero": {
+            "title": "Thank you!",
+            "text": "We received your message and will reply soon."
+        }
+    }
 }

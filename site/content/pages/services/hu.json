@@ -1,10 +1,13 @@
 {
-  "slug": "szolgaltatasok",
-  "title": "Szolgáltatások",
-  "description": "Szolgáltatásaink áttekintése.",
-  "template": "page",
-  "fields": {
-    "hero": { "title": "Szolgáltatások", "text": "Amiben segíteni tudunk." },
-    "body": "<ul><li>Tanácsadás</li><li>Fejlesztés</li><li>Üzemeltetés</li></ul>"
-  }
+    "slug": "szolgaltatasok",
+    "title": "Szolgáltatások",
+    "description": "Szolgáltatásaink áttekintése.",
+    "template": "page",
+    "fields": {
+        "hero": {
+            "title": "Szolgáltatások",
+            "text": "Amiben segíteni tudunk."
+        },
+        "body": "<ul><li>Tanácsadás</li><li>Fejlesztés</li><li>Üzemeltetés</li></ul>"
+    }
 }
