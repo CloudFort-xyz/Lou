@@ -434,11 +434,14 @@ final class AdminApp
 
     private function rPostShare(): Response
     {
-        $days = max(1, min(30, (int) ($this->req->input('days') ?: 7)));
-        $token = (new Previews($this->app))->create('share', 'draft:' . $this->owner(), $days * 86400, $this->user());
-        $this->db->audit('editor', 'share-preview', $token, $this->user());
+        $live = $this->req->input('live') === '1';
+        $days = $live ? 1 : max(1, min(30, (int) ($this->req->input('days') ?: 7)));
+        $token = (new Previews($this->app))->create($live ? 'live' : 'share', 'draft:' . $this->owner(), $days * 86400, $this->user());
+        $this->db->audit('editor', $live ? 'live-preview' : 'share-preview', $token, $this->user());
         $base = rtrim((string) $this->app->config['base_url'], '/');
-        return Response::json(200, ['ok' => true, 'url' => $base . Previews::urlPrefix($token) . '/', 'days' => $days]);
+        $path = $this->req->input('path');
+        $path = preg_match('#^/[a-z0-9/\-]*$#', $path) ? $path : '/';
+        return Response::json(200, ['ok' => true, 'url' => $base . Previews::urlPrefix($token) . $path, 'days' => $days, 'live' => $live]);
     }
 
     private function rPostRevoke(): Response
@@ -508,7 +511,7 @@ final class AdminApp
     {
         $builds = array_reverse(array_map('basename', glob($this->app->varDir . '/builds/before-*', GLOB_ONLYDIR) ?: []));
         $live = is_file($this->app->varDir . '/live.json') ? Fs::readJson($this->app->varDir . '/live.json') : null;
-        $previews = array_filter((new Previews($this->app))->all(), fn ($p) => $p['kind'] === 'share');
+        $previews = array_filter((new Previews($this->app))->all(), fn ($p) => in_array($p['kind'], ['share', 'live'], true));
         return $this->page('Builds', 'builds', ['builds' => $builds, 'live' => $live, 'previews' => $previews]);
     }
 

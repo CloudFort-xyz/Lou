@@ -26,7 +26,9 @@
     <h2>Your draft</h2>
     <p id="status" class="muted" role="status" aria-live="polite"><?= $drafted ? 'Your changes are saved in your draft. Nobody else sees them until you submit.' : 'No changes yet. Edits are saved to your own draft.' ?></p>
     <p><a class="btn btn-primary" href="<?= $self ?>?r=review">Review and submit</a></p>
-    <p><button class="btn btn-link" type="button" id="share">Create a shareable preview link</button></p>
+    <p><button class="btn btn-link" type="button" id="share">Create a shareable preview link</button><br>
+      <button class="btn btn-link" type="button" id="share-live">Create a live viewer link</button>
+      <small class="muted">The client sees your changes appear as you save them. Valid for a day.</small></p>
     <p id="share-result" class="muted"></p>
     <h2>How to edit</h2>
     <p class="muted">Click any highlighted text in the preview to edit it, then click outside to save. Click an image to replace it or change its description.</p>

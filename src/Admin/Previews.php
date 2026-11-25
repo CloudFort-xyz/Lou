@@ -16,6 +16,7 @@ use Lou\View;
  * indexed, and survive publishing. Each shows a source: a person's draft, staging, or site/. Kinds:
  *   - "editor":  a person's inline-editing preview of their draft (editor script injected), rotated daily
  *   - "share":   a read-only link to show the client, expires after N days, revocable
+ *   - "live":    like share, but reloads by itself whenever its source changes (show the client edits as you make them)
  *   - "draft":   an assistant's preview of its draft (stable link)
  *   - "staging": the review preview of everything on staging (stable link)
  */
@@ -157,14 +158,18 @@ final class Previews
     private function build(string $token, array $entry): array
     {
         $editor = $entry['kind'] === 'editor';
-        $inject = $editor
-            ? '<link rel="stylesheet" href="/_lou/editor.css"><script src="/_lou/editor.js" defer data-page="{page}" data-lang="{lang}"></script>'
-            : '';
+        $inject = match ($entry['kind']) {
+            'editor' => '<link rel="stylesheet" href="/_lou/editor.css"><script src="/_lou/editor.js" defer data-page="{page}" data-lang="{lang}"></script>',
+            // live viewer: polls version.json (a static file rewritten on every rebuild) and reloads on change
+            'live'   => '<script src="/_lou/viewer.js" defer data-version="' . self::urlPrefix($token) . '/version.json"></script>',
+            default  => '',
+        };
         $source = $this->sourceApp((string) ($entry['source'] ?? 'site'));
         $result = (new Builder($source))->build($editor ? View::MODE_EDIT : View::MODE_PREVIEW, $this->baseDir() . '/' . $token, self::urlPrefix($token), $inject);
         if (!is_file($this->baseDir() . '/.htaccess')) {
             Fs::write($this->baseDir() . '/.htaccess', "Options -Indexes\n<IfModule mod_headers.c>\n    Header always set X-Robots-Tag \"noindex, nofollow\"\n</IfModule>\n");
         }
+        Fs::write($this->baseDir() . "/$token/version.json", (string) json_encode(['v' => $result['id'] . '-' . bin2hex(random_bytes(4))]));
         return $this->lastResult = $result;
     }
 

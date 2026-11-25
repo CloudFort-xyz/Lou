@@ -161,3 +161,23 @@ test('workflow: published changes are committed to Git when enabled', function (
     contains($git('log', '-1', '--format=%s|%an'), 'Darker text|bence');
     check($git('status', '--porcelain', '--', 'site') === '', 'site/ is clean after the commit');
 });
+
+test('workflow: live viewer links reload by themselves when the editor saves', function () {
+    [$app, , $bence] = workflow_setup();
+    $res = body($bence->handle(admin_req('POST', 'share', ['live' => '1', 'path' => '/en/about-us/'])));
+    check($res['ok'] && $res['live'] && str_ends_with($res['url'], '/en/about-us/'), json_encode($res));
+    $dir = $app->outputDir() . dirname(parse_url($res['url'], PHP_URL_PATH), 2);
+    $html = file_get_contents($dir . '/en/about-us/index.html');
+    contains($html, '/_lou/viewer.js');
+    contains($html, 'data-version="/_lou/p/' . basename($dir) . '/version.json"');
+    check(!str_contains($html, 'editor.js') && !str_contains($html, 'data-lou-field'), 'viewer links are not editable');
+    $v1 = Fs::readJson("$dir/version.json")['v'];
+
+    save_title($bence, 'Live title', 'about', 'en');
+    contains(file_get_contents($dir . '/en/about-us/index.html'), 'Live title');
+    check(Fs::readJson("$dir/version.json")['v'] !== $v1, 'version changes on every rebuild');
+    check(is_file($app->outputDir() . '/_lou/viewer.js'), 'viewer script ships with the live build');
+
+    $res = body($bence->handle(admin_req('POST', 'share', ['live' => '1', 'path' => 'javascript:x'])));
+    check(str_ends_with($res['url'], '/'), 'odd paths fall back to the home page');
+});

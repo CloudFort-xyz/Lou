@@ -54,6 +54,8 @@ public/        build output = web root, gitignored
 
 Everyone (each admin user and each assistant) edits their own **draft**. **Submit** moves a draft's changes to **staging**, and anyone who can edit can **publish** staging under **Review**. Two people changing the same file is flagged as a conflict. Every publish keeps the old and new version of each changed file, templates included, under **History**. From there you can undo a publish or a single file, which puts the old version into your draft. Limit it with `'history' => ['keep' => 200, 'days' => 0]`, or turn it off with `'history' => false`.
 
+To show a client your edits as you make them, use **Create a live viewer link** in the editor. The link reloads by itself whenever you save, using plain static polling with no extra server.
+
 ## Connecting an assistant
 
 Create a token under **Admin → Assistants**. The page shows ready-to-paste snippets. For Claude Code:

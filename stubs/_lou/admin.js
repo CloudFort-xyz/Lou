@@ -124,16 +124,22 @@
     }
   });
 
-  // shareable preview link
-  document.getElementById('share').addEventListener('click', function () {
-    post('share', { days: 7 }).then(function (res) {
+  // shareable preview links (live: the viewer reloads by itself as you save)
+  function share(live) {
+    var path = '/';
+    try {
+      path = new URL(frame.contentWindow.location.href).pathname.replace(/^\/_lou\/p\/[a-f0-9]{32}/, '') || '/';
+    } catch (e) { /* ignore */ }
+    post('share', live ? { live: '1', path: path } : { days: 7 }).then(function (res) {
       var out = document.getElementById('share-result');
       if (res.ok) {
-        out.textContent = res.url + ' (valid for ' + res.days + ' days)';
+        out.textContent = res.url + (res.live ? ' (live, valid for a day)' : ' (valid for ' + res.days + ' days)');
         if (navigator.clipboard) navigator.clipboard.writeText(res.url).then(function () { out.textContent += ', copied'; }, function () {});
       } else {
         out.textContent = res.message || 'Failed';
       }
     });
-  });
+  }
+  document.getElementById('share').addEventListener('click', function () { share(false); });
+  document.getElementById('share-live').addEventListener('click', function () { share(true); });
 })();
