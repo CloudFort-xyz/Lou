@@ -437,3 +437,14 @@ test('admin: times are rendered as <time> in UTC for admin.js to localise', func
     check(AdminApp::stamp(0) === '<time datetime="1970-01-01T00:00:00Z">1970-01-01 00:00 UTC</time>', 'Unix time');
     check(AdminApp::stamp('not a date <b>') === 'not a date &lt;b&gt;' && AdminApp::stamp(null) === '', 'bad input is escaped');
 });
+
+test('admin: long or rarely used sections are native <details> accordions', function () {
+    [$admin] = admin_setup();
+    $get = fn (string $r) => $admin->handle(admin_req('GET', $r, [], ['headers' => ['accept' => 'text/html']]))->body;
+    $a = $get('assistants');
+    check(substr_count($a, '<details class="fold"') === 4 && substr_count($a, '<details class="fold" open>') === 1, 'one accordion per client, Claude Code open');
+    contains($a, 'data-fold-all="#clients"');
+    contains($get('backups'), '<details class="fold"><summary><h2>Restore a backup</h2>');
+    contains($get('updates'), '<details class="fold" id="design">');
+    contains($get('edit'), '<details class="fold fold-panel" open><summary><h2>Page settings</h2>');
+});

@@ -10,8 +10,8 @@ $who = static fn (string $owner): string => preg_replace('/^llm:/', '', preg_rep
   <p class="muted">You have no unsubmitted changes.</p>
 <?php else: ?>
   <div class="card wide">
-    <p><?= count($mine['files']) ?> changed file<?= count($mine['files']) === 1 ? '' : 's' ?>:
-      <?php foreach ($mine['files'] as $f): ?><code><?= $e($f) ?></code> <?php endforeach ?></p>
+    <details class="fold fold-small"><summary><?= count($mine['files']) ?> changed file<?= count($mine['files']) === 1 ? '' : 's' ?></summary>
+      <p><?php foreach ($mine['files'] as $f): ?><code><?= $e($f) ?></code> <?php endforeach ?></p></details>
     <?php if ($mine['conflicts']): ?><p class="alert alert-error">Someone else changed some of the same files on staging. You'll be asked what to do when you submit.</p><?php endif ?>
     <form method="post" action="<?= $self ?>?r=submit" class="stack">
       <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
@@ -50,7 +50,7 @@ $who = static fn (string $owner): string => preg_replace('/^llm:/', '', preg_rep
       <?php foreach ($meta['submissions'] as $sub): ?>
         <li><strong><?= $e($who($sub['by'])) ?></strong>, <?= $time($sub['at']) ?>
           <?php if ($sub['summary'] !== ''): ?><blockquote class="pre"><?= $e($sub['summary']) ?></blockquote><?php endif ?>
-          <small class="muted"><?= $e(implode(', ', $sub['files'])) ?></small></li>
+          <details class="fold fold-small"><summary><?= count($sub['files']) ?> file<?= count($sub['files']) === 1 ? '' : 's' ?></summary><small class="muted"><?= $e(implode(', ', $sub['files'])) ?></small></details></li>
       <?php endforeach ?>
     </ul>
 
@@ -88,7 +88,9 @@ $who = static fn (string $owner): string => preg_replace('/^llm:/', '', preg_rep
       <?php endif ?>
     <?php endif ?>
 
-    <h3>Files (<?= count($all) ?>)</h3>
+    <details class="fold" id="changed-files"><summary><h3>Changed files (<?= count($all) ?>)</h3> <small class="muted">technical: every change, line by line</small></summary>
+    <?php if (count($diffs) > 1): ?><p class="fold-tools"><button class="btn btn-link" type="button" data-fold-all="#staged-diffs"><?= count($diffs) <= 5 ? 'Collapse all' : 'Expand all' ?></button></p><?php endif ?>
+    <div id="staged-diffs">
     <?php foreach ($diffs as $path => $diff): ?>
       <details class="diff"<?= count($diffs) <= 5 ? ' open' : '' ?>>
         <summary><code><?= $e($path) ?></code> <span class="badge<?= $kind($path) === 'deleted' ? ' badge-warn' : '' ?>"><?= $kind($path) ?></span></summary>
@@ -97,6 +99,8 @@ $who = static fn (string $owner): string => preg_replace('/^llm:/', '', preg_rep
           ?><span class="<?= $c ?>"><?= $e($line) ?></span><?php endforeach ?></pre>
       </details>
     <?php endforeach ?>
+    </div>
+    </details>
 
     <h3>Decision</h3>
     <div class="actions">

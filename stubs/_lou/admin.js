@@ -72,6 +72,33 @@
     });
   });
 
+  // Accordions: "Expand all / Collapse all" for a group of <details>, and open the one a #link points at.
+  function syncFoldButtons() {
+    document.querySelectorAll('[data-fold-all]').forEach(function (b) {
+      var box = document.querySelector(b.dataset.foldAll);
+      if (!box) return;
+      var closed = box.querySelectorAll('details:not([open])').length;
+      b.textContent = closed ? 'Expand all' : 'Collapse all';
+    });
+  }
+  document.querySelectorAll('[data-fold-all]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var box = document.querySelector(b.dataset.foldAll);
+      if (!box) return;
+      var open = box.querySelectorAll('details:not([open])').length > 0;
+      box.querySelectorAll('details').forEach(function (d) { d.open = open; });
+      syncFoldButtons();
+    });
+  });
+  document.addEventListener('toggle', syncFoldButtons, true); // toggle doesn't bubble, so listen while capturing
+  syncFoldButtons();
+  function openHash() {
+    var target = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
+    for (var el = target; el; el = el.parentElement) if (el.tagName === 'DETAILS') el.open = true;
+  }
+  window.addEventListener('hashchange', openHash);
+  openHash();
+
   // Times are rendered in UTC; show them in the browser's time zone (UTC stays in the tooltip).
   var pad = function (n) { return (n < 10 ? '0' : '') + n; };
   document.querySelectorAll('time[datetime]').forEach(function (t) {
