@@ -523,8 +523,33 @@ final class AdminApp
             $diffs = $s->diffs();
             $vars += ['meta' => $s->meta(), 'diffs' => $diffs, 'items' => ChangeList::of($s, $diffs), 'problems' => $s->validate(),
                 'conflicts' => $s->conflicts(), 'preview' => $s->lastPreview()];
+            $vars['views'] = $this->previewLinks($s, $vars['items'], $vars['preview']);
         }
         return $this->page('Review', 'review', $vars);
+    }
+
+    /**
+     * Each changed page's address inside the staging preview, so Review can open it directly.
+     * Only while the preview is current (it shows exactly what is staged); deleted pages have none.
+     * @return array<string, string> file path => preview URL of that page
+     */
+    private function previewLinks(Workspace $s, array $items, ?array $preview): array
+    {
+        if (!$preview || (int) $preview['rev'] !== (int) $s->meta()['rev']) {
+            return [];
+        }
+        try {
+            $site = Site::load($s->app());
+        } catch (LouException) {
+            return [];
+        }
+        $out = [];
+        foreach ($items as $it) {
+            if ($it['page'] && $it['kind'] !== 'deleted' && $site->page($it['page']['id'], $it['page']['lang'])) {
+                $out[$it['path']] = rtrim((string) $preview['url'], '/') . $site->path($it['page']['id'], $it['page']['lang']);
+            }
+        }
+        return $out;
     }
 
     private function rPostReviewPreview(): Response

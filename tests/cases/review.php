@@ -171,3 +171,25 @@ test('design import: content edited on the server is never touched, and a first 
     check(is_file(draft_site($app) . '/assets/css/extra.css'), 'server-only file kept');
     check(Fs::readJson(draft_site($app) . '/content/pages/about/hu.json')['title'] === 'Szerver', 'server content kept');
 });
+
+test('review: each changed page links straight to itself in the preview', function () {
+    [$admin, , $app] = admin_setup();
+    $html = ['headers' => ['accept' => 'text/html']];
+    draft_edit($app, 'user:bence', [
+        'content/pages/about/en.json' => json_edit(function ($d) { $d['slug'] = 'who-we-are'; return $d; }),
+        'assets/css/site.css'         => fn ($s) => $s . "b{}\n",
+    ]);
+    $admin->handle(admin_req('POST', 'submit', ['summary' => 'x']));
+    $url = Workspace::staging($app)->lastPreview()['url'];
+    $page = $admin->handle(admin_req('GET', 'review', [], $html))->body;
+    $link = rtrim($url, '/') . '/en/who-we-are/';
+    check(substr_count($page, 'href="' . $link . '"') === 2, 'View link on the change and in "Changed pages": ' . $link);
+    contains($page, 'Changed pages:');
+    check(is_file($app->outputDir() . parse_url($link, PHP_URL_PATH) . 'index.html'), 'the link points at a built page');
+
+    // a stale preview gives no page links (they could show something else)
+    draft_edit($app, 'user:bence', ['content/pages/contact/en.json' => json_edit(function ($d) { $d['title'] = 'Talk'; return $d; })]);
+    Workspace::draft($app, 'user:bence')->apply();
+    Workspace::staging($app)->touch();
+    check(!str_contains($admin->handle(admin_req('GET', 'review', [], $html))->body, 'Changed pages:'), 'no links while stale');
+});
