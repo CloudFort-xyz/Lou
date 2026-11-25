@@ -174,6 +174,9 @@ final class Builder
     {
         $base = rtrim((string) $this->app->config['base_url'], '/');
         $robots = "User-agent: *\nAllow: /\n";
+        if ($base !== '' && !$this->app->baseUrlConfigured()) {
+            $warnings[] = "base_url is still the example ($base): set the real https:// address in site/config.php, the sitemap and hreflang links point there";
+        }
         if ($base === '') {
             $warnings[] = 'base_url is not set in site/config.php: sitemap.xml and hreflang links were skipped';
             Fs::write($dir . '/robots.txt', $robots);

@@ -34,8 +34,11 @@ final class McpServer
     ) {
     }
 
+    private string $siteUrl = '';
+
     public function handle(Request $req): Response
     {
+        $this->siteUrl = $this->app->siteUrl($req);
         if (!$this->originAllowed($req->header('origin'))) {
             return Response::json(403, ['error' => 'Origin not allowed']);
         }
@@ -144,7 +147,7 @@ final class McpServer
             throw new LouException('Rate limit reached (' . self::CALLS_PER_10_MIN . ' calls per 10 minutes). Wait a few minutes.');
         }
         $this->hit($key);
-        return (new Tools($this->app, $this->db, $caller))->call($name, $args);
+        return (new Tools($this->app, $this->db, $caller, $this->siteUrl))->call($name, $args);
     }
 
     private static function result(mixed $id, array|object $result): array
@@ -193,7 +196,7 @@ final class McpServer
             'openapi' => '3.1.0',
             'info' => ['title' => 'Lou bridge: ' . $this->app->config['name'], 'version' => App::VERSION,
                 'description' => 'Call describe_site first. All changes are staged until a human approves them.'],
-            'servers' => [['url' => rtrim((string) $this->app->config['base_url'], '/')]],
+            'servers' => [['url' => $this->siteUrl ?: $this->app->siteUrl()]],
             'components' => ['securitySchemes' => ['bearer' => ['type' => 'http', 'scheme' => 'bearer']]],
             'security' => [['bearer' => []]],
             'paths' => $paths,

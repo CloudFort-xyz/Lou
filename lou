@@ -235,6 +235,9 @@ try {
             } elseif ($sub === 'add') {
                 $token = $tokens->create(implode(' ', array_slice($pos, 2)));
                 echo "$token\nShown once. Bridge URL: " . rtrim((string) $app->config['base_url'], '/') . "/_lou/mcp.php\n";
+                if (!$app->baseUrlConfigured()) {
+                    fwrite(STDERR, "Warning: base_url in site/config.php is not your real address, so the URL above is wrong.\n");
+                }
             } elseif ($sub === 'revoke') {
                 $tokens->revoke($pos[2] ?? throw new LouException('Usage: php lou token revoke ID'));
                 echo "Token revoked\n";

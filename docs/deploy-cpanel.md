@@ -102,13 +102,13 @@ Turn on HTTPS with **SSL/TLS Status → Run AutoSSL**.
 cd ~/lou
 cp .env.example.php .env.php && chmod 600 .env.php
 nano .env.php            # SMTP login (cPanel → Email Accounts → Connect Devices), API keys
-nano site/config.php     # 'base_url' => 'https://client-domain.hu', mail 'transport' => 'smtp', 'from'
+nano site/config.php     # mail 'transport' => 'smtp', 'from'
 php lou check            # should end with "All required pieces are there"
 php lou user add bence --role=admin
 php lou build
 ```
 
-Then open `https://client-domain.hu/_lou/admin.php`.
+Then open `https://client-domain.hu/_lou/admin.php` and set the site address under **Settings**. It's used for the sitemap, language links, preview links and the bridge URL. Until you set it, the admin shows a red banner, and `php lou check` reports it as FAIL.
 
 ## 6. Cron jobs
 
