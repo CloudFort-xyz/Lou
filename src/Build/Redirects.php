@@ -101,7 +101,7 @@ final class Redirects
             $to = $e['to'] ?? null;
             if (is_array($to)) {
                 try {
-                    $to = $site->url((string) $to['page'], (string) $to['lang']);
+                    $to = $site->path((string) $to['page'], (string) $to['lang']);
                 } catch (LouException $ex) {
                     $errors[] = "Redirect from $from: " . $ex->getMessage();
                     continue;

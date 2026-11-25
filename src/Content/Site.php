@@ -28,13 +28,14 @@ final class Site
     /** @var array<string, string> memoised urls, "id|lang" => url */
     private array $urls = [];
 
-    private function __construct(public readonly App $app)
+    /** @param string $urlPrefix prepended to every URL (preview builds served from a sub-path) */
+    private function __construct(public readonly App $app, public readonly string $urlPrefix = '')
     {
     }
 
-    public static function load(App $app): self
+    public static function load(App $app, string $urlPrefix = ''): self
     {
-        $site = new self($app);
+        $site = new self($app, rtrim($urlPrefix, '/'));
         $site->loadPages();
         $site->loadGlobals();
         $site->validate();
@@ -109,8 +110,14 @@ final class Site
         return ($isDefault && !$this->app->config['prefix_default']) ? '' : '/' . $lang;
     }
 
-    /** Root-relative URL of a page, always ending in "/" (or "404.html" for not-found). */
+    /** URL of a page as linked from the built pages (includes the preview prefix, if any). */
     public function url(string $id, string $lang): string
+    {
+        return $this->urlPrefix . $this->path($id, $lang);
+    }
+
+    /** Root-relative path of a page on the live site, always ending in "/" (or "404.html" for not-found). */
+    public function path(string $id, string $lang): string
     {
         $key = "$id|$lang";
         if (isset($this->urls[$key])) {
@@ -224,7 +231,7 @@ final class Site
         $seen = [];
         foreach ($this->allPages() as $page) {
             try {
-                $url = $this->url($page->id, $page->lang);
+                $url = $this->path($page->id, $page->lang);
                 if (isset($seen[$url])) {
                     $errors[] = "Duplicate URL $url: pages '{$seen[$url]}' and '{$page->id}'";
                 }

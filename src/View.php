@@ -17,7 +17,8 @@ use Lou\Support\Html;
 final class View
 {
     public const MODE_LIVE = 'live';
-    public const MODE_PREVIEW = 'preview';
+    public const MODE_PREVIEW = 'preview'; // clean preview (shareable links)
+    public const MODE_EDIT = 'edit';       // admin editor preview: adds data-lou-field markers
 
     private ?string $layout = null;
     private bool $needsFormsJs = false;
@@ -128,9 +129,19 @@ final class View
     }
 
     /** Marks an element as inline-editable. Prints nothing in live builds. */
-    public function editable(string $path): string
+    /**
+     * Marks an element as inline-editable. Prints nothing in live builds.
+     * $type: 'text' (plain text), 'html' (rich text, use with $v->html()) or 'image' (set by $v->image()).
+     */
+    public function editable(string $path, string $type = 'text'): string
     {
-        return $this->mode === self::MODE_LIVE ? '' : ' data-lou-field="' . Html::escape($path) . '"';
+        if (!in_array($type, ['text', 'html', 'image'], true)) {
+            throw new LouException("Unknown editable type '$type'");
+        }
+        if ($this->mode !== self::MODE_EDIT) {
+            return '';
+        }
+        return ' data-lou-field="' . Html::escape($path) . '"' . ($type !== 'text' ? ' data-lou-type="' . $type . '"' : '');
     }
 
     /** <img> from an image field ({src, alt}). */
@@ -159,7 +170,7 @@ final class View
         foreach ($attrs as $k => $val) {
             $out .= ' ' . $k . '="' . Html::escape($val) . '"';
         }
-        return $out . $this->editable($path) . '>';
+        return $out . $this->editable($path, 'image') . '>';
     }
 
     // ------------------------------------------------------------ forms
@@ -268,7 +279,7 @@ final class View
     public function absoluteUrl(string $pageId, ?string $lang = null): string
     {
         $base = rtrim((string) $this->site->app->config['base_url'], '/');
-        return Html::escape($base . $this->site->url($pageId, $lang ?? $this->page->lang));
+        return Html::escape($base . $this->site->path($pageId, $lang ?? $this->page->lang));
     }
 
     /** URL of a file in site/assets with a content hash for cache busting. */
@@ -282,11 +293,12 @@ final class View
         if (!str_starts_with($url, '/assets/')) {
             return $url; // external or absolute URL
         }
+        $prefix = $this->site->urlPrefix;
         if (!isset($this->assetHashes[$url])) {
             $file = $this->site->app->siteDir . $url;
             $this->assetHashes[$url] = is_file($file) ? substr(md5_file($file) ?: '', 0, 8) : '';
         }
-        return $this->assetHashes[$url] !== '' ? $url . '?v=' . $this->assetHashes[$url] : $url;
+        return $prefix . ($this->assetHashes[$url] !== '' ? $url . '?v=' . $this->assetHashes[$url] : $url);
     }
 
     /**
@@ -329,11 +341,10 @@ final class View
             if ($this->site->page($this->page->id, $lang) === null) {
                 continue;
             }
-            $url = $this->site->url($this->page->id, $lang);
             $out[] = [
                 'lang'     => $lang,
-                'url'      => Html::escape($url),
-                'absolute' => Html::escape($base . $url),
+                'url'      => Html::escape($this->site->url($this->page->id, $lang)),
+                'absolute' => Html::escape($base . $this->site->path($this->page->id, $lang)),
                 'current'  => $lang === $this->page->lang,
             ];
         }

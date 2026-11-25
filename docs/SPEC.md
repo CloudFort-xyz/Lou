@@ -316,10 +316,20 @@ expiry).
 
 ## 8. Admin and inline editor
 
-- At `/_lou/admin/`: log in with a username and password (bcrypt hash in
-  `.env.php`), plus an optional TOTP later. Sessions are hardened (secure,
-  httponly, SameSite=Strict cookies, CSRF tokens).
-- **Inline editing:** the admin loads a preview build (with
+- At `/_lou/admin.php`: log in with a user name and password. Users are
+  managed with `php lou user add|remove|list` and stored as password hashes
+  in `var/users.json`. Roles: **editor** (edit content, publish, see
+  submissions) and **admin** (also redirects, builds/rollback, backups,
+  deleting submissions). Sessions are hardened: their own save path in
+  `var/sessions`, strict mode, a `__Host-` cookie with Secure, HttpOnly and
+  SameSite=Strict, a 2 h idle and 12 h absolute timeout, CSRF tokens on every
+  POST, a same-origin check, and login rate limiting. TOTP can come later.
+- **Previews are static builds at secret URLs** (`/_lou/p/<128-bit token>/`)
+  inside the web root, so they need no PHP to view and work on any host.
+  They're never indexed, survive publishing, and expire. The admin's editing
+  preview has the editor script injected. Shareable preview links are clean
+  copies for the client.
+- **Inline editing:** the admin loads the editing preview (with
   `data-lou-field` markers) in an iframe. Clicking a marked element edits
   it in place: text is contenteditable, and images open an upload/replace
   dialog. Saving writes the JSON field and rebuilds the affected page.
@@ -377,8 +387,7 @@ without approval.
 3. It proposes changes. These are written to **`var/staging/`** (a copy of
    `site/`), never to `site/` directly.
 4. Lou builds staging into a **preview** at a secret, expiring URL
-   (`/_lou/preview/<random token>/`, served from `var/previews/` through a
-   tiny PHP passthrough, with `noindex` headers). The link is **shareable**,
+   (`/_lou/p/<random token>/`, a static build, see section 8). The link is **shareable**,
    so the client can see it without logging in. It expires after 7 days by
    default and can be revoked from the admin.
 5. A human reviews the diff, the preview and the **redirect report** (see

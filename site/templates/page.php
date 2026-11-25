@@ -6,5 +6,5 @@
   <?php endif ?>
 </section>
 <?php if ($v->has('body')): ?>
-<div class="prose"<?= $v->editable('body') ?>><?= $v->html('body') ?></div>
+<div class="prose"<?= $v->editable('body', 'html') ?>><?= $v->html('body') ?></div>
 <?php endif ?>
