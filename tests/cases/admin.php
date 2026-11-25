@@ -545,7 +545,7 @@ test('admin: long or rarely used sections are native <details> accordions', func
     [$admin] = admin_setup();
     $get = fn (string $r) => $admin->handle(admin_req('GET', $r, [], ['headers' => ['accept' => 'text/html']]))->body;
     $a = $get('assistants');
-    check(substr_count($a, '<details class="fold"') === 4 && substr_count($a, '<details class="fold" open>') === 1, 'one accordion per client, Claude Code open');
+    check(substr_count($a, '<details class="fold"') === 6 && substr_count($a, '<details class="fold" open>') === 1, 'one accordion per client, Claude Code open');
     contains($a, 'data-fold-all="#clients"');
     contains($get('backups'), '<details class="fold"><summary><h2>Restore a backup</h2>');
     contains($get('updates'), '<details class="fold" id="design">');
