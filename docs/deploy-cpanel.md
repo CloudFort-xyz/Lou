@@ -122,14 +122,15 @@ Turn on HTTPS with **SSL/TLS Status → Run AutoSSL**.
 ```sh
 cd ~/lou
 cp .env.example.php .env.php && chmod 600 .env.php
-nano .env.php            # SMTP login (cPanel → Email Accounts → Connect Devices), API keys
-nano site/config.php     # mail 'transport' => 'smtp', 'from'
+nano .env.php            # API keys, captcha secrets (if any)
 php lou check            # should end with "All required pieces are there"
 php lou user add bence --role=admin
 php lou build
 ```
 
 Then open `https://client-domain.hu/_lou/admin.php` and set the site address under **Settings**. It's used for the sitemap, language links, preview links and the bridge URL. Until you set it, the admin shows a red banner, and `php lou check` reports it as FAIL.
+
+On the same screen, under **Email**, choose **Send with SMTP** and enter the sender address and the SMTP login (cPanel → Email Accounts → Connect Devices shows the server, port and user). Then use **Send test email**. Until SMTP is set up, form emails only go to `var/mail.log`.
 
 ## 6. Cron jobs
 

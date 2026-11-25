@@ -315,3 +315,60 @@ test('admin: every screen renders inside the shell without inline styles or scri
     $login = admin_setup(loggedIn: false)[0]->handle(admin_req('GET', 'login', [], ['headers' => ['accept' => 'text/html']]));
     check(!str_contains($login->body, 'class="sidebar"'), 'no menu on the login screen');
 });
+
+test('admin: SMTP settings are stored owner-only, the password is never shown and empty keeps it', function () {
+    [$admin, , $app] = admin_setup();
+    file_put_contents($app->envFile(), "<?php return ['smtp' => ['host' => 'old.example.hu', 'pass' => 'from-env']];");
+    $html = fn () => $admin->handle(admin_req('GET', 'settings', [], ['headers' => ['accept' => 'text/html']]))->body;
+    contains($html(), 'value="old.example.hu"');
+    contains($html(), 'Currently read from <code>.env.php</code>');
+    check(!str_contains($html(), 'from-env'), 'the .env.php password must not be echoed');
+
+    $post = ['transport' => 'smtp', 'from' => 'web@pelda.hu', 'from_name' => "Példa\r\nBcc: x@evil.test", 'host' => 'Mail.Pelda.hu',
+        'port' => '465', 'secure' => 'ssl', 'user' => 'web@pelda.hu', 'pass' => ' s3cret pass '];
+    $r = $admin->handle(admin_req('POST', 'mail-settings', $post));
+    check($r->status === 303, $r->body);
+    $secrets = Fs::readJson($app->secretsFile());
+    check($secrets['smtp'] === ['host' => 'mail.pelda.hu', 'port' => 465, 'user' => 'web@pelda.hu', 'pass' => ' s3cret pass ', 'secure' => 'ssl'], json_encode($secrets));
+    check((fileperms($app->secretsFile()) & 0777) === 0600, 'secrets.json must be 0600, got ' . decoct(fileperms($app->secretsFile()) & 0777));
+    check(!str_contains(file_get_contents($app->varDir . '/settings.json'), 's3cret'), 'no password in settings.json');
+
+    $fresh = new App($app->root);
+    check($fresh->config['mail']['from'] === 'web@pelda.hu' && $fresh->config['mail']['from_name'] === 'Példa Bcc: x@evil.test', json_encode($fresh->config['mail']));
+    check(($fresh->config['mail']['transport'] ?? '') === 'smtp', 'transport overrides site/config.php');
+    check(\Lou\Env::load($fresh)->get('smtp.host') === 'mail.pelda.hu', 'the admin values win over .env.php');
+    $page = (new AdminApp($fresh, new Database($fresh->databaseFile()), new ArraySession(['user' => 'bence', 'role' => 'admin', 'started' => time(), 'seen' => time(), 'csrf' => 'tok'])))
+        ->handle(admin_req('GET', 'settings', [], ['headers' => ['accept' => 'text/html']]))->body;
+    check(!str_contains($page, 's3cret'), 'the saved password must never be echoed');
+    contains($page, 'Saved. Leave empty to keep it');
+
+    $admin->handle(admin_req('POST', 'mail-settings', ['pass' => ''] + $post));
+    check(Fs::readJson($app->secretsFile())['smtp']['pass'] === ' s3cret pass ', 'empty password keeps the stored one');
+    $admin->handle(admin_req('POST', 'mail-settings', ['pass' => '', 'clear_pass' => '1'] + $post));
+    check(Fs::readJson($app->secretsFile())['smtp']['pass'] === '', 'the password can be removed');
+
+    foreach ([['host' => 'mail.pelda.hu/x'], ['port' => '0'], ['secure' => 'starttls'], ['from' => 'nope'], ['transport' => 'sendmail']] as $bad) {
+        check($admin->handle(admin_req('POST', 'mail-settings', $bad + $post))->status === 422, 'rejected: ' . json_encode($bad));
+    }
+    [$editor] = admin_setup('editor');
+    check($editor->handle(admin_req('POST', 'mail-settings', $post))->status === 403, 'admins only');
+    check($editor->handle(admin_req('POST', 'mail-test', ['to' => 'a@b.hu']))->status === 403, 'admins only');
+});
+
+test('admin: the test email goes through the configured mailer and failures are shown', function () {
+    [$admin, , $app] = admin_setup();
+    $mailer = new ArrayMailer();
+    $integrations = new \Lou\Integrations($app, \Lou\Env::load($app));
+    $integrations->useMailer($mailer);
+    $admin->useIntegrations($integrations);
+    $r = $admin->handle(admin_req('POST', 'mail-test', ['to' => 'bence@pelda.hu'], ['headers' => ['accept' => 'text/html']]));
+    check($r->status === 200 && count($mailer->sent) === 1 && $mailer->sent[0]->to === ['bence@pelda.hu'], $r->body);
+    contains($mailer->sent[0]->subject, 'Lou test email');
+    contains($r->body, 'alert-ok');
+
+    $mailer->fail = true;
+    $r = $admin->handle(admin_req('POST', 'mail-test', ['to' => 'bence@pelda.hu'], ['headers' => ['accept' => 'text/html']]));
+    contains($r->body, 'The test email failed.');
+    contains($r->body, 'SMTP down');
+    check($admin->handle(admin_req('POST', 'mail-test', ['to' => 'not-an-address']))->status === 422, 'bad address');
+});
