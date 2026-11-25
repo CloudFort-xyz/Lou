@@ -1,0 +1,94 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Lou\Setup;
+
+use Lou\LouException;
+use Lou\Support\Fs;
+
+/**
+ * Copies Lou's code from a checkout (e.g. the cPanel Git clone) into a live install.
+ *
+ * Code is replaced; content and runtime data are not. site/ is seeded from the checkout only when the
+ * install has none, because after that the server's site/ is the truth (editor, assistants, history).
+ * var/, .env.php and the build output are never touched.
+ */
+final class Deployer
+{
+    /** Code shipped on every deploy (folders are replaced whole, files overwritten). */
+    public const CODE = ['src', 'stubs', 'vendor-bundled', 'lou', '.env.example.php'];
+
+    public function __construct(private readonly string $source)
+    {
+    }
+
+    /** @return array{target: string, code: list<string>, seeded: bool} */
+    public function deploy(string $target): array
+    {
+        $source = rtrim((string) realpath($this->source), '/');
+        if ($source === '' || !is_file("$source/lou") || !is_dir("$source/src")) {
+            throw new LouException("$this->source is not a Lou checkout");
+        }
+        $target = rtrim($target, '/');
+        if ($target === '' || !str_starts_with($target, '/')) {
+            throw new LouException('The install folder must be an absolute path');
+        }
+        Fs::ensureDir($target);
+        if (realpath($target) === $source) {
+            throw new LouException('The install folder must not be the checkout itself');
+        }
+
+        // Stage everything first, then swap each item in, so a failed copy leaves the install as it was.
+        $stage = "$target/.lou-deploy-" . bin2hex(random_bytes(4));
+        $copied = [];
+        try {
+            foreach (self::CODE as $item) {
+                if (is_dir("$source/$item")) {
+                    Fs::copyDir("$source/$item", "$stage/$item");
+                } elseif (is_file("$source/$item")) {
+                    Fs::ensureDir($stage);
+                    if (!copy("$source/$item", "$stage/$item")) {
+                        throw new LouException("Cannot copy $source/$item");
+                    }
+                } else {
+                    continue;
+                }
+                $copied[] = $item;
+            }
+            foreach ($copied as $item) {
+                $this->swap("$stage/$item", "$target/$item");
+            }
+        } finally {
+            Fs::removeDir($stage);
+        }
+        @chmod("$target/lou", 0755);
+
+        $seeded = false;
+        if (!is_dir("$target/site") && is_dir("$source/site")) {
+            Fs::copyDir("$source/site", "$target/site");
+            $seeded = true;
+        }
+        return ['target' => $target, 'code' => $copied, 'seeded' => $seeded];
+    }
+
+    private function swap(string $new, string $dest): void
+    {
+        if (!file_exists($dest)) {
+            if (!rename($new, $dest)) {
+                throw new LouException("Cannot move $new to $dest");
+            }
+            return;
+        }
+        $old = $dest . '.lou-old';
+        is_dir($old) ? Fs::removeDir($old) : @unlink($old);
+        if (!rename($dest, $old)) {
+            throw new LouException("Cannot move $dest out of the way");
+        }
+        if (!rename($new, $dest)) {
+            rename($old, $dest);
+            throw new LouException("Cannot move $new to $dest");
+        }
+        is_dir($old) ? Fs::removeDir($old) : unlink($old);
+    }
+}
