@@ -63,6 +63,29 @@ $snippet = static function (string $id, string $text, string $label) use ($e, $t
 <p><?= $t('Add this to <code>claude_desktop_config.json</code> (Settings → Developer → Edit config), then restart Claude Desktop:') ?></p>
 <?= $snippet('snip-desktop', (string) json_encode(['mcpServers' => ['lou' => ['command' => 'npx', 'args' => ['-y', 'mcp-remote', $mcp, '--header', "Authorization: Bearer $tok"]]]], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $t->plain('the Claude Desktop config')) ?>
 </details>
+<details class="fold"><summary><h3>Microsoft Copilot</h3> <small class="muted"><?= $t('Microsoft 365, through Copilot Studio') ?></small></summary>
+<p><?= $t('Copilot connects to the site through an agent you make in {!studio}. This needs a work account with Copilot Studio (a licence or a trial). The free Copilot app can’t connect to sites like this one.', ['studio' => '<a href="https://copilotstudio.microsoft.com" target="_blank" rel="noopener">Copilot Studio</a>']) ?></p>
+<ol>
+  <li><?= $t('Create an agent (or open one), then go to <strong>Tools → Add a tool → New tool → Model Context Protocol</strong>.') ?></li>
+  <li><?= $t('Give it a name (e.g. the site’s name) and paste this as the <strong>server URL</strong>:') ?></li>
+</ol>
+<?= $snippet('snip-copilot-url', $mcp, $t->plain('the server URL')) ?>
+<ol start="3">
+  <li><?= $t('Under <strong>Authentication</strong> choose <strong>API key</strong>, type <strong>Query</strong>, parameter name <code>key</code>. Create it, then create the connection and paste your token when asked:') ?></li>
+</ol>
+<?= $snippet('snip-copilot-token', $tok, $t->plain('the token')) ?>
+<ol start="4">
+  <li><?= $t('Optionally, add this to the agent’s <strong>instructions</strong>:') ?></li>
+</ol>
+<?= $snippet('snip-copilot-instructions', 'You edit a website through the Lou tools. Always call describe_site first and follow its rules. Build a preview, share the preview link, and only submit for review when the user is happy with it.', $t->plain('the instructions')) ?>
+<ol start="5">
+  <li><?= $t('Publish the agent to Microsoft 365 Copilot or Teams, and use it from there.') ?></li>
+</ol>
+</details>
+<details class="fold"><summary><h3>GitHub Copilot in VS Code</h3> <small class="muted"><?= $t('config file') ?></small></summary>
+<p><?= $t('Save this as <code>.vscode/mcp.json</code> (or add it to your user MCP settings), start the server and use Copilot Chat in <strong>Agent</strong> mode. VS Code asks for the token once and keeps it out of the file.') ?></p>
+<?= $snippet('snip-vscode', (string) json_encode(['inputs' => [['type' => 'promptString', 'id' => 'lou-token', 'description' => 'Lou token', 'password' => true]], 'servers' => ['lou' => ['type' => 'http', 'url' => $mcp, 'headers' => ['Authorization' => 'Bearer ${input:lou-token}']]]], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $t->plain('the VS Code config')) ?>
+</details>
 <details class="fold"><summary><h3><?= $t('Technical details') ?></h3> <small class="muted"><?= $t('bridge URL, plain HTTP, OpenAPI') ?></small></summary>
 <p><?= $t('The bridge speaks MCP (streamable HTTP) at this URL. Send the token as <code>Authorization: Bearer …</code>, or as <code>?key=</code> for clients that only take a URL.') ?></p>
 <?= $snippet('snip-url', $mcp, $t->plain('the bridge URL')) ?>

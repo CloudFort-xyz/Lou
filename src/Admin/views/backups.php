@@ -27,8 +27,8 @@ $madeAt = static fn (string $f): string => preg_match('/-(\d{4})(\d{2})(\d{2})-(
   </tbody>
 </table>
 <?php endif ?>
-<details class="fold"><summary><h2><?= $t('Restore a backup') ?></h2> <small class="muted"><?= $t('replaces the current content') ?></small></summary>
-<form method="post" action="<?= $self ?>?r=restore" enctype="multipart/form-data" class="stack" data-confirm="<?= $t('Replace the current content with this backup? (The current state is backed up first.)') ?>">
+<details class="fold"><summary><h2><?= $t('Restore a backup') ?></h2> <small class="muted"><?= $t('goes to Review first') ?></small></summary>
+<form method="post" action="<?= $self ?>?r=restore" enctype="multipart/form-data" class="stack" data-confirm="<?= $t('Put this backup on Review? Nothing goes live until you publish it. (The current state is backed up first.)') ?>">
   <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
   <label><?= $t('Backup file') ?> <input type="file" name="backup" accept=".zip" required></label>
   <label><?= $t('Password') ?> <small class="muted"><?= $t('(only for encrypted backups)') ?></small> <input type="password" name="password" autocomplete="off"></label>

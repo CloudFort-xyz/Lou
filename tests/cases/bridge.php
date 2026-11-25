@@ -51,10 +51,38 @@ test('bridge: template guard allows view helpers and blocks code execution', fun
         '<?php echo $_GET["x"] ?>', '<?php new SplFileObject("x") ?>', '<?php App::x() ?>', '<?php `id` ?>',
         '<?php file_get_contents("/etc/passwd") ?>', '<?php $$a ?>', '<?php $x->y() ?>', '<?php $v->{"a"}() ?>',
         '<?php array_map("system", ["id"]) ?>', '<?php (function () {})() ?>', '<?php fn() => 1 ?>', '<?php if ( ?>',
+        // callees that are values, not names (each one ran phpinfo() before the guard knew about them)
+        "<?php 'phpinfo'() ?>", '<?php "phpinfo"() ?>', "<?php ('php' . 'info')() ?>", "<?php \$a = ['phpinfo']; \$a[0]() ?>",
+        "<?php ['Lou\\\\Support\\\\Fs', 'files']('/') ?>", '<?php $f = "phpinfo"; "{$f}"() ?>', "<?= \$v->field('f')() ?>",
+        "<?php \$x = <<<EOT\nphpinfo\nEOT;\n(<<<EOT\nphpinfo\nEOT)() ?>", '<?php $c = strlen(...) ?>',
     ];
     foreach ($bad as $code) {
         check(TemplateGuard::check($code) !== [], "should be rejected: $code");
     }
+});
+
+test('bridge: redirects.json entries cannot inject .htaccess lines or write outside the build', function () {
+    $root = install();
+    $app = new App($root);
+    $bad = [
+        [['from' => '/a', 'to' => "/b\"\nAddHandler application/x-httpd-php .css\n#"]],
+        [['from' => "/a\nOptions +Indexes\n", 'status' => 410]],
+        [['from' => '/../../escaped', 'to' => 'https://example.org/']],
+        [['from' => '/a', 'to' => 'javascript:alert(1)']],
+    ];
+    foreach ($bad as $entries) {
+        Fs::writeJson("$root/site/redirects.json", $entries);
+        try {
+            (new Builder($app))->build();
+            check(false, 'should fail: ' . json_encode($entries));
+        } catch (LouException $e) {
+            contains($e->getMessage(), 'Invalid redirects');
+        }
+        check(!is_dir(dirname($root, 2) . '/escaped'), 'no file outside the build');
+    }
+    Fs::writeJson("$root/site/redirects.json", [['from' => '/régi-oldal/', 'to' => 'https://example.org/a?b=1&c=2']]);
+    (new Builder($app))->build();
+    contains(file_get_contents($app->outputDir() . '/.htaccess'), '"https://example.org/a?b=1&c=2"', 'normal URLs and UTF-8 paths still work');
 });
 
 test('bridge: path policy keeps writes inside site content, templates and assets', function () {
@@ -243,7 +271,10 @@ test('bridge: assistants screen creates a token once and revokes it; live build 
     check(!str_contains($page, $m[0]), 'token not shown again');
     contains($page, 'claude mcp add');
     contains($page, 'lou_YOUR_TOKEN');
-    check(substr_count($page, 'data-copy="snip-') === 5, 'every snippet has a copy button');
+    check(substr_count($page, 'data-copy="snip-') === 9, 'every snippet has a copy button');
+    contains($page, 'Copilot Studio');
+    contains($page, 'parameter name <code>key</code>', 'Copilot Studio sends the token as ?key=');
+    contains($page, '${input:lou-token}', 'the VS Code config prompts for the token instead of storing it');
     $id = array_key_first((new Tokens($app->varDir . '/tokens.json'))->all());
     $admin->handle(admin_req('POST', 'token-revoke', ['id' => $id]));
     contains($admin->handle(admin_req('GET', 'assistants', [], ['headers' => ['accept' => 'text/html']]))->body, 'The token was revoked');

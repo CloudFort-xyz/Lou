@@ -90,6 +90,12 @@ final class Redirects
                 $errors[] = "Redirect 'from' must start with '/': '$from'";
                 continue;
             }
+            if (!self::safeTarget($from) || preg_match('#(^|/)\.\.?(/|$)#', $from)) {
+                // a newline would end the RedirectMatch line in .htaccess, and ".." would let the fallback page escape the build
+                $errors[] = 'Redirect from ' . json_encode($from, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                    . ': no spaces, quotes, backslashes, control characters or ./.. segments';
+                continue;
+            }
             if (isset($live[$from])) {
                 $errors[] = "Redirect from $from shadows a live page; remove it from site/redirects.json";
                 continue;
@@ -111,6 +117,11 @@ final class Redirects
                 $errors[] = "Redirect from $from has no target";
                 continue;
             }
+            if (!self::safeTarget($to) || !preg_match('#^(/|https?://)#', $to)) {
+                $errors[] = "Redirect from $from: the target must be a path starting with '/' or an http(s) URL, "
+                    . 'with no spaces, quotes, backslashes or control characters';
+                continue;
+            }
             if (rtrim($to, '/') === rtrim($from, '/')) {
                 $errors[] = "Redirect loop: $from → $to";
                 continue;
@@ -121,6 +132,12 @@ final class Redirects
             throw new LouException('Invalid redirects:', $errors);
         }
         return $rules;
+    }
+
+    /** No whitespace, control characters, quotes or backslashes: they would break out of the quoted .htaccess value. */
+    public static function safeTarget(string $s): bool
+    {
+        return !preg_match('/[\x00-\x20\x7f"\\\\]/', $s) && mb_check_encoding($s, 'UTF-8');
     }
 
     /** Apache mod_alias rules (exact match, optional trailing slash). */

@@ -8,6 +8,7 @@ use Lou\Admin\NativeSession;
 use Lou\Admin\Previews;
 use Lou\Admin\Users;
 use Lou\App;
+use Lou\Backup\Backup;
 use Lou\Build\Builder;
 use Lou\Db\Database;
 use Lou\Http\Request;
@@ -320,6 +321,14 @@ test('admin: submissions export, deletion and redirect management', function () 
     $ht = file_get_contents($app->outputDir() . '/.htaccess');
     contains($ht, 'RedirectMatch 301 "^/regi\-oldal/?$" "/kapcsolat/"');
     contains($ht, 'RedirectMatch 410 "^/megszunt/?$"');
+
+    // a line break or quote would end the RedirectMatch line and add a directive to .htaccess; ".." would escape the build
+    foreach ([['from' => "/x\nOptions +Indexes", 'action' => '410'], ['from' => "/x/\n", 'action' => '410'], ['from' => '/../../x', 'action' => '410'],
+              ['from' => '/y', 'action' => 'url', 'url' => "https://e.example/\"\nAddHandler application/x-httpd-php .css\n#"]] as $bad) {
+        $r = $admin->handle(admin_req('POST', 'redirect', $bad, ['headers' => ['accept' => 'text/html']]));
+        check($r->status === 200 && str_contains($r->body, 'Error'), 'refused: ' . json_encode($bad));
+    }
+    check(count(Fs::readJson("{$app->siteDir}/redirects.json")) === 2, 'nothing unsafe was saved');
 });
 
 test('admin: every screen renders', function () {
@@ -545,7 +554,7 @@ test('admin: long or rarely used sections are native <details> accordions', func
     [$admin] = admin_setup();
     $get = fn (string $r) => $admin->handle(admin_req('GET', $r, [], ['headers' => ['accept' => 'text/html']]))->body;
     $a = $get('assistants');
-    check(substr_count($a, '<details class="fold"') === 4 && substr_count($a, '<details class="fold" open>') === 1, 'one accordion per client, Claude Code open');
+    check(substr_count($a, '<details class="fold"') === 6 && substr_count($a, '<details class="fold" open>') === 1, 'one accordion per client, Claude Code open');
     contains($a, 'data-fold-all="#clients"');
     contains($get('backups'), '<details class="fold"><summary><h2>Restore a backup</h2>');
     contains($get('updates'), '<details class="fold" id="design"');
@@ -566,4 +575,35 @@ test('admin: backups can be deleted (admins only, only real backup files)', func
     check($admin->handle(admin_req('POST', 'backup-delete', ['file' => $file], $html))->status === 303, 'deleted');
     check(!is_file($app->varDir . "/backups/$file") && is_file($app->varDir . '/users.json'), 'only the backup is gone');
     contains($admin->handle(admin_req('GET', 'backups', [], $html))->body, "Backup $file deleted.");
+});
+
+test('admin: a restored backup goes to Review, and unsafe backups are refused', function () {
+    [$admin, , $app] = admin_setup();
+    $home = "{$app->siteDir}/content/pages/home/en.json";
+    $backup = (new Backup($app))->create();
+    editJson($home, fn ($d) => ['title' => 'Changed after the backup'] + $d);
+    $before = file_get_contents($home);
+
+    $r = $admin->handle(admin_req('POST', 'restore', ['content_only' => ''], [], ['backup' => ['tmp_name' => $backup, 'name' => 'b.zip', 'error' => UPLOAD_ERR_OK]]));
+    check($r->status === 303 && str_contains($r->headers['Location'], 'r=review'), 'goes to Review: ' . $r->status);
+    check(file_get_contents($home) === $before, 'site/ is untouched until publish');
+    $staging = \Lou\Content\Workspace::staging($app);
+    check($staging->changedFiles() === ['content/pages/home/en.json'], json_encode($staging->changedFiles()));
+    check(str_starts_with($staging->meta()['submissions'][0]['summary'], 'Restore from b.zip'), 'summary');
+
+    $again = $admin->handle(admin_req('POST', 'restore', [], ['headers' => ['accept' => 'text/html']], ['backup' => ['tmp_name' => $backup, 'name' => 'b.zip', 'error' => UPLOAD_ERR_OK]]));
+    contains($again->body, 'waiting on Review', 'refused while staging is open');
+    $admin->handle(admin_req('POST', 'reject'));
+
+    // a backup made elsewhere, with code in a template and an .htaccess in assets
+    foreach (['templates/page.php' => "<?php ('sys' . 'tem')('id') ?>", 'assets/.htaccess' => "Require all granted\n", 'assets/x.php' => '<?php echo 1;'] as $rel => $code) {
+        $root2 = install();
+        $other = new App($root2);
+        Fs::write("$root2/site/$rel", $code);
+        $evil = (new Backup($other))->create();
+        $r = $admin->handle(admin_req('POST', 'restore', [], ['headers' => ['accept' => 'text/html']], ['backup' => ['tmp_name' => $evil, 'name' => 'evil.zip', 'error' => UPLOAD_ERR_OK]]));
+        contains($r->body, 'was not restored', "$rel refused");
+        check(!$staging->exists(), "$rel: nothing on staging");
+    }
+    check(file_get_contents($home) === $before, 'site/ still untouched');
 });
