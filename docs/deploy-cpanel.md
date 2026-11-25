@@ -91,6 +91,8 @@ cPanel clones without submodules, so run `git submodule update --init` once in t
 php ~/repositories/kner.hu-lou/lou/lou deploy ~/domains/kner.hu --site=$HOME/repositories/kner.hu-lou/site
 ```
 
+In this mode, later deploys also bring the server's `site/templates/` and `site/assets/` up to date with the repository, file by file: new and changed files are written, and files removed from the repository are removed. A file that was changed on the server since the last deploy (by an assistant, for example) is **never overwritten**. The deploy skips it and prints a warning until you commit the server's version to the repository (or delete the file on the server). `site/assets/uploads/` (editor images), content, menus, config, `var/` and `.env.php` always stay the server's. `var/deploy-design.json` records what the last deploy wrote.
+
 For automatic deploys, add `--pull` to the same command in cron. With `--site`, it pulls the client repository (not Lou), checks out the Lou commit it pins, then deploys with that code. Moving the client to a newer Lou is a commit in the client repository that bumps the submodule.
 
 ## 3. First deploy

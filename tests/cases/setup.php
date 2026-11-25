@@ -91,7 +91,7 @@ test('deploy: copies code, seeds site/ once, keeps site/, var/ and .env.php on l
     check(glob("$target/.lou-deploy-*") === [] && glob("$target/*.lou-old") === [], 'no leftovers');
 });
 
-test('deploy --site: seeds the install from a client site folder, once, and refuses folders without config.php', function () {
+test('deploy --site: seeds from a client site once, then updates templates/assets except server-edited files', function () {
     $repo = dirname(__DIR__, 2);
     $client = temp_dir();
     Fs::copyDir("$repo/site", "$client/site");
@@ -102,9 +102,42 @@ test('deploy --site: seeds the install from a client site folder, once, and refu
     check(is_file("$target/site/templates/client-marker.php"), 'seeded from the client site, not the example');
     check(is_file("$target/src/App.php"), 'code still comes from the Lou checkout');
 
+    // server-side edits: content, uploads and server-edited design files must survive
+    Fs::write("$target/site/content/pages/home/hu.json.marker", 'edited on server');
+    Fs::write("$target/site/assets/uploads/2026/photo.webp", 'uploaded');
+    Fs::write("$target/site/templates/assistant-new.php", 'made on the server');
+    Fs::write("$target/site/templates/page.php", 'edited on the server');
+    Fs::write("$client/site/templates/page.php", 'edited in the repo');
     Fs::write("$client/site/templates/later.php", 'later');
+    Fs::write("$client/site/assets/css/site.css", 'body{}');
+    unlink("$client/site/templates/client-marker.php");
+    Fs::write("$client/site/content/pages/home/hu.json.repo", 'repo content');
     $r = (new Deployer($repo, "$client/site"))->deploy($target);
-    check(!$r['seeded'] && !is_file("$target/site/templates/later.php"), 'later deploys keep the server copy');
+    $d = $r['design'];
+    check(!$r['seeded'], 'later deploys do not seed');
+    check($d['updated'] === ['assets/css/site.css', 'templates/later.php'], 'updated: ' . implode(',', $d['updated']));
+    check($d['deleted'] === ['templates/client-marker.php'], 'deleted: ' . implode(',', $d['deleted']));
+    check($d['skipped'] === ['templates/page.php'], 'skipped: ' . implode(',', $d['skipped']));
+    check(file_get_contents("$target/site/templates/page.php") === 'edited on the server', 'server edit not overwritten');
+    check(is_file("$target/site/templates/assistant-new.php"), 'server-only template kept');
+    check(!is_file("$target/site/templates/client-marker.php"), 'template removed in the repo is removed');
+    check(file_get_contents("$target/site/assets/css/site.css") === 'body{}', 'css deployed');
+    check(is_file("$target/site/assets/uploads/2026/photo.webp"), 'editor uploads kept');
+    check(is_file("$target/site/content/pages/home/hu.json.marker"), 'server content kept');
+    check(!is_file("$target/site/content/pages/home/hu.json.repo"), 'repo content not deployed');
+
+    // the conflict stays reported until resolved; committing the server's version resolves it
+    $r = (new Deployer($repo, "$client/site"))->deploy($target);
+    check($r['design']['skipped'] === ['templates/page.php'] && $r['design']['updated'] === [], 'still skipped, nothing else');
+    Fs::write("$client/site/templates/page.php", 'edited on the server');
+    $r = (new Deployer($repo, "$client/site"))->deploy($target);
+    check($r['design']['skipped'] === [], 'resolved');
+    Fs::write("$client/site/templates/page.php", 'v2');
+    $r = (new Deployer($repo, "$client/site"))->deploy($target);
+    check($r['design']['updated'] === ['templates/page.php'], 'repo updates flow again after resolving');
+
+    $plain = (new Deployer($repo))->deploy(temp_dir() . '/plain');
+    check($plain['design']['updated'] === [] && !is_file(dirname($plain['target']) . '/plain/var/deploy-design.json'), 'without --site nothing is synced');
 
     try {
         (new Deployer($repo, temp_dir()))->deploy(temp_dir() . '/x');

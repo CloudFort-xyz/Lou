@@ -209,7 +209,10 @@ Deploy options:
   overwritten, because the server's `site/` is the truth. cPanel runs it from
   `.cpanel.yml` (see `docs/deploy-cpanel.md`). KeyHelp can do the same from a
   deploy hook. A client site kept in its own repository (Lou as a submodule)
-  deploys with `--site=DIR` to seed from its own `site/`; `--pull` then pulls
+  deploys with `--site=DIR` to seed from its own `site/`; in that mode every
+  deploy also updates `site/templates/` and `site/assets/` from the repository,
+  except files changed on the server since the last deploy (skipped with a
+  warning, never overwritten) and `assets/uploads/`. Content stays the server's. `--pull` then pulls
   the client repository and its pinned Lou commit.
 - `php lou check` reports missing PHP pieces (version, extensions, writable
   folders) and config warnings.

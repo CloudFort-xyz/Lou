@@ -149,7 +149,15 @@ try {
                 try {
                     $r = (new Deployer(__DIR__, $siteSource))->deploy($target);
                     echo '  updated: ' . implode(', ', $r['code']) . "\n";
-                    echo $r['seeded'] ? '  site/ did not exist, seeded it from ' . ($siteSource ?? 'the repository') . "\n" : "  site/ kept (the server's copy is the live content)\n";
+                    echo $r['seeded'] ? '  site/ did not exist, seeded it from ' . ($siteSource ?? 'the repository') . "\n" : "  site/ content kept (the server's copy is the live content)\n";
+                    foreach (['updated' => 'updated from the repository', 'deleted' => 'deleted (removed from the repository)'] as $k => $label) {
+                        foreach ($r['design'][$k] as $f) {
+                            echo "  site/$f: $label\n";
+                        }
+                    }
+                    foreach ($r['design']['skipped'] as $f) {
+                        echo "  warning: site/$f was changed on the server since the last deploy, so the repository's version was not applied. Commit the server's version to the repository, or delete it on the server, then deploy again\n";
+                    }
                     lou_report_check(array_values(array_filter((new Requirements($target))->run(), fn ($i) => $i['level'] !== Requirements::OK)));
                     if (!isset($opt['no-build'])) {
                         $proc = proc_open([PHP_BINARY, "$target/lou", 'build'], [], $pipes);
@@ -289,7 +297,9 @@ try {
                                               Copy the code from this checkout into an install, seed site/ on the
                                               first deploy only, then build. Without DIR: every folder listed in
                                               ~/.lou-target, or ~/lou. --site: seed from this site folder (a
-                                              client repo with Lou as a submodule). --pull (for cron): git pull
+                                              client repo with Lou as a submodule) and update site/templates
+                                              and site/assets from it on every deploy, skipping files changed
+                                              on the server since the last deploy. --pull (for cron): git pull
                                               first (the client repo with --site, plus its submodules) and do
                                               nothing when there is nothing new
               version                         Show the version
