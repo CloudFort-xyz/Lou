@@ -144,6 +144,22 @@ final class View
         return ' data-lou-field="' . Html::escape($path) . '"' . ($type !== 'text' ? ' data-lou-type="' . $type . '"' : '');
     }
 
+    /**
+     * Marks an element as one item of a list field ("features.$i"), so editors can duplicate,
+     * delete and move it. Only items of lists that already exist in the content can be changed.
+     * Prints nothing in live builds.
+     */
+    public function item(string $path): string
+    {
+        if (!preg_match('/^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*\.\d+$/', $path)) {
+            throw new LouException("\$v->item('$path'): expected the path of a list item, e.g. \"features.\$i\"");
+        }
+        if ($this->mode !== self::MODE_EDIT) {
+            return '';
+        }
+        return ' data-lou-item="' . Html::escape($path) . '"';
+    }
+
     /** <img> from an image field ({src, alt}). */
     public function image(string $path, string $class = '', bool $lazy = true): string
     {
