@@ -16,7 +16,7 @@ $tok = $newToken ?? 'lou_YOUR_TOKEN';
 
 <h2>Tokens</h2>
 <?php if (!$tokens): ?><p class="muted">No tokens yet.</p><?php else: ?>
-<table class="table">
+<table class="table list">
   <thead><tr><th>Name</th><th>Created</th><th>Last used</th><th></th></tr></thead>
   <tbody>
   <?php foreach ($tokens as $id => $t): ?>

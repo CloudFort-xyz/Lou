@@ -1,7 +1,7 @@
 <?php /** @var Lou\Content\Page $page */ ?>
 <div class="editor" data-page="<?= $e($page->id) ?>" data-lang="<?= $e($page->lang) ?>" data-can-slug="<?= $role === 'admin' ? '1' : '' ?>">
   <aside class="panel">
-    <p><a href="<?= $self ?>">← Pages</a></p>
+    <p><a href="<?= $self ?>?r=pages">← Pages</a></p>
     <div class="langs">
       <?php foreach ($site->languages() as $l): ?>
         <?php if ($site->page($page->id, $l)): ?>

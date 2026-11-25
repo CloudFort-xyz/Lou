@@ -1,11 +1,13 @@
-<h1>Backups</h1>
-<form method="post" action="<?= $self ?>?r=backup">
-  <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
-  <button class="btn btn-primary" type="submit">Create backup now</button>
-  <span class="muted">Content, images, templates and the database in one .zip. Passwords and API keys are not included.</span>
-</form>
+<div class="page-head">
+  <h1>Backups</h1>
+  <form method="post" action="<?= $self ?>?r=backup" class="inline">
+    <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+    <button class="btn btn-primary" type="submit">Create backup now</button>
+  </form>
+</div>
+<p class="muted">Content, images, templates and the database in one .zip. Passwords and API keys are not included.</p>
 <?php if ($files): ?>
-<table class="table">
+<table class="table list">
   <tbody>
   <?php foreach ($files as $f): ?>
     <tr><td><?= $e($f) ?></td><td><?= $e(number_format($sizes[$f] / 1024, 0)) ?> KB</td>

@@ -1,4 +1,4 @@
-/* Lou admin: confirmations, and the parent side of the inline editor. */
+/* Lou admin: confirmations, the mobile menu, and the parent side of the inline editor. */
 (function () {
   'use strict';
   var body = document.body;
@@ -8,6 +8,18 @@
   document.querySelectorAll('form[data-confirm]').forEach(function (f) {
     f.addEventListener('submit', function (e) { if (!window.confirm(f.dataset.confirm)) e.preventDefault(); });
   });
+
+  // small screens: the side menu opens from the top bar button
+  var toggle = document.getElementById('menu-toggle');
+  if (toggle) {
+    toggle.addEventListener('click', function () {
+      var open = body.classList.toggle('menu-open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && body.classList.contains('menu-open')) { body.classList.remove('menu-open'); toggle.setAttribute('aria-expanded', 'false'); toggle.focus(); }
+    });
+  }
 
   document.querySelectorAll('[data-select]').forEach(function (i) {
     i.addEventListener('focus', function () { i.select(); });

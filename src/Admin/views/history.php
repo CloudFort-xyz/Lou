@@ -7,7 +7,7 @@ $who = static fn (string $owner): string => preg_replace('/^(user|llm):/', '', $
 <?php if ($file !== ''): ?><p><a href="<?= $self ?>?r=history">← All changes</a></p><?php endif ?>
 <p class="muted">Every publish keeps the old and new version of each file it changed: content, templates, styles, menu and settings. Restoring puts the old version into your draft, so it goes live the usual way.</p>
 <?php if (!$entries): ?><p class="muted">No history yet.</p><?php else: ?>
-<table class="table">
+<table class="table list">
   <thead><tr><th>Published</th><th>Changes</th><th>Files</th></tr></thead>
   <tbody>
   <?php foreach ($entries as $en): ?>

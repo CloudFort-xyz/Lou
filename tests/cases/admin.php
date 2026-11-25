@@ -283,3 +283,35 @@ test('admin: settings saves base_url, rebuilds the sitemap with it, and is admin
     $r = $editor->handle(admin_req('POST', 'settings', ['base_url' => 'https://x.hu']));
     check($r->status === 403, "editor got {$r->status}");
 });
+
+test('admin: the dashboard is the start screen and the side menu follows the role', function () {
+    [$admin, , $app, $db] = admin_setup();
+    $db->run("INSERT INTO submissions (form, lang, data, status, created_at) VALUES ('contact', 'hu', ?, 'ok', ?)",
+        [json_encode(['name' => 'Kiss <Anna>', 'email' => 'anna@example.hu']), gmdate('Y-m-d H:i:s')]);
+    $r = $admin->handle(new Request('GET', [], [], ['host' => 'example.com', 'accept' => 'text/html'], '203.0.113.9', https: true));
+    check($r->status === 200, "dashboard got {$r->status}");
+    contains($r->body, '<h1>Dashboard</h1>');
+    contains($r->body, 'Kiss &lt;Anna&gt;', 'latest submissions are listed, escaped');
+    contains($r->body, '<strong>1</strong> form submission');
+    contains($r->body, 'href="/_lou/admin.php?r=dashboard" aria-current="page"', 'dashboard is the current menu item');
+    contains($r->body, '?r=settings', 'admins see the admin-only menu');
+
+    [$editor] = admin_setup('editor');
+    $r = $editor->handle(admin_req('GET', 'dashboard', [], ['headers' => ['accept' => 'text/html']]));
+    check($r->status === 200 && !str_contains($r->body, '?r=backups') && !str_contains($r->body, '?r=assistants'), 'editors do not see admin-only items');
+    contains($r->body, 'href="/_lou/admin.php?r=dashboard" aria-current="page"');
+});
+
+test('admin: every screen renders inside the shell without inline styles or scripts', function () {
+    [$admin, , $app] = admin_setup();
+    $admin->handle(admin_req('POST', 'save', ['page' => 'about', 'lang' => 'hu', 'field' => 'hero.title', 'type' => 'text', 'value' => 'Shell']));
+    foreach (['dashboard', 'pages', 'review', 'history', 'submissions', 'subscribers', 'assistants', 'redirects', 'builds', 'backups', 'settings'] as $route) {
+        $r = $admin->handle(admin_req('GET', $route, [], ['headers' => ['accept' => 'text/html']]));
+        check($r->status === 200, "$route got {$r->status}");
+        contains($r->body, 'class="sidebar"', "$route: no side menu");
+        contains($r->body, 'class="topbar-status"', "$route: the draft indicator is missing");
+        check(!preg_match('/\sstyle=|<style|<script(?![^>]*\ssrc=)/i', $r->body), "$route has inline style or script (the CSP blocks them)");
+    }
+    $login = admin_setup(loggedIn: false)[0]->handle(admin_req('GET', 'login', [], ['headers' => ['accept' => 'text/html']]));
+    check(!str_contains($login->body, 'class="sidebar"'), 'no menu on the login screen');
+});
