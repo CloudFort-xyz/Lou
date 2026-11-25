@@ -80,6 +80,16 @@ An update only replaces Lou's code (`src/`, `stubs/`, `vendor-bundled/`, `starte
 
 An install that is a Git checkout, or that `php lou deploy` copies code into from a clone (it leaves `var/deployed-from.json`), updates from Git, and the Updates screen says so.
 
+## Deploying a client site's design from a zip
+
+If a client site lives in its own repository but the server can't pull it, open **Admin → Updates → Site design from a zip** and upload the repository as a zip (GitHub: **Code → Download ZIP**), or any zip with a `site/` folder.
+
+- Templates and assets follow the zip. This is the same rule as `php lou deploy --site`: a file changed on the server since the last deploy (by an assistant, say) keeps the server's version and is listed as skipped.
+- Content, the menu, `config.php` and uploaded images (`assets/uploads/`) are never touched.
+- Templates go through the same safety check as assistants' templates.
+- Nothing goes live directly. The changes land in your draft, and you submit, preview and publish them under **Review** as usual. Once published, they become the baseline for the next deploy.
+- The first time (on a site that started from a starter), every file that differs from the zip is proposed, so check the diffs in Review. A site installed from a client zip already has its baseline.
+
 ## For maintainers: publishing a release
 
 1. Once per project, run `php lou release-key`. It writes `src/Setup/release-key.pub` (commit it) and prints a secret key. Add that secret as the repository's Actions secret `LOU_SIGNING_KEY`. Keep no other copy, and never commit it.

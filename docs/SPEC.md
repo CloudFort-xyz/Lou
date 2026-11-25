@@ -218,6 +218,12 @@ Deploy options:
   `src/Setup/release-key.pub`), swap in the code with the Deployer, and ask
   for one rebuild (`var/live.json` records the Lou version of each build).
   See `docs/install.md`.
+- **Client site design from a zip (fallback, no Git).** Admin → Updates
+  takes a zip of a client repository. Its templates and assets are planned
+  with the same rule as `deploy --site` (`Deployer::planDesign`), checked
+  like assistants' templates, and written into the uploader's draft, so they
+  go live through Review. `var/deploy-design.pending.json` holds what the
+  import wrote until a publish makes it live (`DesignImport::confirm`).
 - **Git (optional):** the server's Git clone is kept separate from the live
   install. `php lou deploy DIR` copies the code (`src/`, `stubs/`,
   `vendor-bundled/`, `lou`) into the install, seeds `site/` only when the

@@ -415,3 +415,92 @@ test('installer web page: cookie-bound form, strict CSP, no script; locked after
     check($ok->status === 200 && str_contains($ok->body, 'Open the admin'), 'installed: ' . strip_tags($ok->body));
     check($app->handle(new Request('GET', [], [], ['host' => 'pelda.hu']))->status === 404, 'locked afterwards');
 });
+
+// ------------------------------------------------------------------------- site design from a zip
+
+/** A GitHub-style zip of a client repo: <top>/site/… with $changes applied (path => contents, null = delete). */
+function client_zip(string $siteDir, array $changes): string
+{
+    $file = temp_dir() . '/client-main.zip';
+    $zip = new ZipArchive();
+    $zip->open($file, ZipArchive::CREATE);
+    $files = [];
+    foreach (Fs::files($siteDir) as $rel) {
+        $files[$rel] = (string) file_get_contents("$siteDir/$rel");
+    }
+    foreach ($changes as $rel => $data) {
+        if ($data === null) {
+            unset($files[$rel]);
+        } else {
+            $files[$rel] = $data;
+        }
+    }
+    foreach ($files as $rel => $data) {
+        $zip->addFromString("client-main/site/$rel", $data);
+    }
+    $zip->close();
+    return $file;
+}
+
+test('admin: a client site zip puts template and asset changes into the draft, content stays, then publish records them', function () {
+    [$admin, , $app] = admin_setup();
+    $html = ['headers' => ['accept' => 'text/html']];
+    $site = $app->siteDir;
+    $page = (string) file_get_contents("$site/templates/page.php");
+    $zip = client_zip($site, [
+        'templates/page.php'           => $page . "\n<!-- v2 -->\n",
+        'assets/css/new.css'           => 'body{color:red}',
+        'templates/evil.php'           => '<?php system("id"); ?>',
+        'content/pages/about/hu.json'  => '{"title":"from the repo"}',
+        'menu.json'                    => '["home"]',
+        'assets/uploads/photo.webp'    => 'repo copy of an upload',
+    ]);
+    $r = $admin->handle(admin_req('POST', 'design-upload', [], $html, ['site' => ['tmp_name' => $zip, 'error' => UPLOAD_ERR_OK, 'name' => 'client-main.zip']]));
+    check($r->status === 200, strip_tags($r->body));
+    contains($r->body, 'are in your draft');
+    contains($r->body, 'templates/evil.php', 'unsafe template reported');
+    $draft = draft_site($app);
+    contains((string) file_get_contents("$draft/templates/page.php"), '<!-- v2 -->');
+    check(is_file("$draft/assets/css/new.css") && !is_file("$draft/templates/evil.php"), 'safe files in, unsafe out');
+    check(!str_contains((string) file_get_contents("$draft/content/pages/about/hu.json"), 'from the repo'), 'content untouched');
+    check((string) file_get_contents("$draft/menu.json") !== '["home"]' && !is_file("$draft/assets/uploads/photo.webp"), 'menu and uploads untouched');
+    check(!str_contains((string) file_get_contents("$site/templates/page.php"), 'v2'), 'nothing live yet');
+
+    $res = submit_and_publish($admin, $app, 'design from zip');
+    check($res->status === 200, strip_tags($res->body));
+    contains((string) file_get_contents("$site/templates/page.php"), '<!-- v2 -->');
+    $manifest = Fs::readJson($app->varDir . '/deploy-design.json');
+    check(($manifest['templates/page.php'] ?? '') === sha1_file("$site/templates/page.php"), 'published files become the baseline');
+    check(!is_file($app->varDir . '/deploy-design.pending.json'), 'nothing pending');
+
+    // a later zip: a template changed on the server since is kept, untouched ones follow the zip
+    file_put_contents("$site/templates/home.php", (string) file_get_contents("$site/templates/home.php") . "\n<!-- server edit -->\n");
+    $zip2 = client_zip($site, ['templates/home.php' => '<?php $v->layout("layout") ?>repo', 'assets/css/new.css' => 'body{color:blue}', 'templates/evil.php' => null]);
+    $r = $admin->handle(admin_req('POST', 'design-upload', [], $html, ['site' => ['tmp_name' => $zip2, 'error' => UPLOAD_ERR_OK, 'name' => 'z.zip']]));
+    contains($r->body, 'Skipped');
+    check(str_contains((string) file_get_contents("$draft/templates/home.php"), 'server edit'), 'server change kept');
+    check((string) file_get_contents("$draft/assets/css/new.css") === 'body{color:blue}', 'unchanged-on-server asset updated');
+
+    [$editor] = admin_setup('editor');
+    check($editor->handle(admin_req('POST', 'design-upload', [], $html, ['site' => ['tmp_name' => $zip, 'error' => UPLOAD_ERR_OK, 'name' => 'z.zip']]))->status === 403, 'admins only');
+});
+
+test('design import: a rejected import does not move the baseline; an installer seeded from a zip records one', function () {
+    $root = install();
+    $app = new App($root);
+    Fs::writeJson("$root/var/deploy-design.json", Lou\Setup\Deployer::designHashes($app->siteDir));
+    $before = (string) file_get_contents("$root/var/deploy-design.json");
+    $draft = Lou\Content\Workspace::draft($app, 'user:bence');
+    $r = (new Lou\Setup\DesignImport($app))->toDraft(client_zip($app->siteDir, ['assets/css/site.css' => 'x{}']), $draft);
+    check($r['written'] === ['assets/css/site.css'] && !$r['first'], 'one change');
+    $draft->discard();
+    Lou\Setup\DesignImport::confirm($app);   // someone publishes something else
+    check((string) file_get_contents("$root/var/deploy-design.json") === $before, 'baseline unchanged while the import is not live');
+    $r = (new Lou\Setup\DesignImport($app))->toDraft(client_zip($app->siteDir, ['assets/css/site.css' => 'x{}']), Lou\Content\Workspace::draft($app, 'user:bence'));
+    check($r['written'] === ['assets/css/site.css'] && $r['skipped'] === [], 'the same zip can be imported again');
+
+    $zipRoot = unpacked_release();
+    $i = new Installer($zipRoot, all_ok($zipRoot));
+    $i->install(install_form($i, ['starter' => 'upload']), client_zip(dirname(__DIR__, 2) . '/site', []), "$zipRoot/public");
+    check(isset(Fs::readJson("$zipRoot/var/deploy-design.json")['templates/page.php']), 'installer records the design baseline');
+});

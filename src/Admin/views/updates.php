@@ -39,6 +39,14 @@
     </form>
   <?php endif ?>
 
+  <h2 id="design">Site design from a zip</h2>
+  <p class="muted">Deploy a client site's templates and assets without Git: upload a zip of its repository (GitHub: Code → Download ZIP) or any zip with a <code>site/</code> folder. Templates and assets follow the zip, except files changed on the server since the last deploy. Content, menus, settings and uploaded images are never touched. The changes go into your draft, so you review and publish them as usual.</p>
+  <form method="post" action="<?= $self ?>?r=design-upload" enctype="multipart/form-data" class="stack">
+    <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+    <label>Site zip <input type="file" name="site" accept=".zip" required></label>
+    <p><button class="btn" type="submit">Import into my draft</button></p>
+  </form>
+
   <?php if ($needsBuild): ?>
     <h3>Rebuild</h3>
     <form method="post" action="<?= $self ?>?r=rebuild" class="inline">

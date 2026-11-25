@@ -158,6 +158,8 @@ final class Installer
             if ($starter !== 'existing') {
                 if ($starter === 'upload') {
                     $r = SiteArchive::extract((string) $siteZip, $siteDir, $scratch, $get('backup_password') ?: null);
+                    // baseline for later design deploys (lou deploy --site, or a zip in Admin → Updates)
+                    Fs::writeJson($this->root . '/var/deploy-design.json', Deployer::designHashes($siteDir));
                     if ($r['database'] !== null) {
                         rename($r['database'], $this->root . '/var/lou.sqlite');
                     }
@@ -191,6 +193,7 @@ final class Installer
             if ($seeded) {
                 Fs::removeDir($siteDir);
                 @unlink($this->root . '/var/lou.sqlite');
+                @unlink($this->root . '/var/deploy-design.json');
             }
             throw $e;
         } finally {

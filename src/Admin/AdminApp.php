@@ -22,6 +22,7 @@ use Lou\Db\Database;
 use Lou\Http\Request;
 use Lou\Http\Response;
 use Lou\LouException;
+use Lou\Setup\DesignImport;
 use Lou\Setup\Updater;
 use Lou\Support\Fs;
 use Lou\Support\Git;
@@ -93,6 +94,7 @@ final class AdminApp
         'POST update'         => 'admin',
         'POST update-upload'  => 'admin',
         'POST rebuild'        => 'admin',
+        'POST design-upload'  => 'admin',
     ];
 
     private Request $req;
@@ -484,6 +486,7 @@ final class AdminApp
             $entry = $history->record($s->changes(), $s->siteDir(), (string) $this->user(), $meta['submissions']);
             try {
                 $applied = $s->apply($this->req->input('force') === '1');
+                DesignImport::confirm($this->app);
             } catch (LouException $e) {
                 if ($entry) {
                     Fs::removeDir($this->app->varDir . "/history/$entry");
@@ -736,6 +739,22 @@ final class AdminApp
         $r = $this->updater()->apply((string) $file['tmp_name'], $this->req->input('allow_older') === '1');
         $this->db->audit('admin', 'update', "{$r['from']} → {$r['to']} (uploaded" . ($r['signed'] ? ')' : ', unsigned)'), $this->user());
         return Response::redirect(self::SELF . '?r=updates');
+    }
+
+    /** A client site zip: its templates and assets go into the uploader's draft, then through Review. */
+    private function rPostDesignUpload(): Response
+    {
+        $file = $this->req->files['site'] ?? null;
+        if (!is_array($file) || ($file['error'] ?? 1) !== UPLOAD_ERR_OK || !$this->isUploaded((string) $file['tmp_name'])) {
+            throw new LouException('Upload a site .zip');
+        }
+        $r = (new DesignImport($this->app))->toDraft((string) $file['tmp_name'], $this->draft());
+        $this->db->audit('admin', 'design-upload', count($r['written']) . ' written, ' . count($r['deleted']) . ' deleted, '
+            . count($r['skipped']) . ' skipped, ' . count($r['rejected']) . ' rejected', $this->user());
+        if ($r['written'] || $r['deleted']) {
+            (new Previews($this->app))->rebuild();
+        }
+        return $this->page('Site design imported', 'design-import', $r);
     }
 
     /** Rebuild the live site and previews with the code on disk (after an update). */
