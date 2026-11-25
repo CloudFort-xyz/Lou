@@ -59,15 +59,20 @@ The repository is private, so cPanel needs a read-only deploy key.
 
    To deploy a client branch, check it out under **Manage → Basic Information → Checked-Out Branch**.
 
-### Installing somewhere other than `~/lou`
+### Installing somewhere else, or several sites
 
-Some hosts give each domain its own folder, for example `~/domains/lou.example.com/` with the document root at `public/` inside it. That folder can be the install, as long as the clone stays elsewhere. Tell the deploy where to install with a one-line file:
+Some hosts give each domain its own folder, for example `~/domains/lou.example.com/` with the document root at `public/` inside it. That folder can be the install, as long as the clone stays elsewhere. List install folders in `~/.lou-target`, one per line:
 
 ```sh
-echo ~/domains/lou.example.com > ~/.lou-target
+echo ~/domains/lou.example.com >> ~/.lou-target
+echo ~/domains/client-b.hu     >> ~/.lou-target
 ```
 
-`.cpanel.yml` reads `~/.lou-target` and installs into `~/lou` when the file is missing. Everywhere this guide says `~/lou`, read your folder instead.
+A deploy without a folder argument (which is what `.cpanel.yml` runs) installs into every folder listed, or into `~/lou` when the file is missing. Every site runs the same Lou code, and each keeps its own `site/`, `var/` and `.env.php`. If one site fails, the others still deploy, and the output names the one that failed. To add a site, create its domain with the document root `<folder>/public`, add the folder to the file, and deploy. The first deploy seeds the new site.
+
+All sites listed move to a new Lou version together. If a site needs to stay on an older version, give it its own clone on a branch and run `php lou deploy <folder>` from that clone.
+
+Everywhere this guide says `~/lou`, read your folder instead.
 
 ## 3. First deploy
 
@@ -120,7 +125,17 @@ Copy backups off the server from time to time. **Admin → Backups** can downloa
 
 ## Updating Lou
 
-Push to GitHub, then in cPanel open **Git Version Control → Manage → Pull or Deploy**. Click **Update from Remote**, then **Deploy HEAD Commit**. The code is replaced and the site is rebuilt. Content isn't touched.
+Push to GitHub, then in cPanel open **Git Version Control → Manage → Pull or Deploy**. Click **Update from Remote**, reload the page, then click **Deploy HEAD Commit**. The code is replaced and the sites are rebuilt. Content isn't touched.
+
+### Automatic deploys (optional)
+
+cPanel doesn't notice pushes to GitHub. To have merges go live by themselves, add a cron job that checks every 5 minutes:
+
+```
+*/5 * * * * /opt/cpanel/ea-php83/root/usr/bin/php ~/repositories/lou/lou deploy --pull >> ~/lou-deploy.log 2>&1
+```
+
+`--pull` runs `git fetch` in the clone and exits silently when the branch has nothing new. When there are new commits, it fast-forwards, then deploys to every folder in `~/.lou-target` using the new code. A lock stops two runs from overlapping. It never runs `git reset`, so if the clone ever has local changes, the fast-forward fails and the error goes to the log. Deploying by hand from cPanel keeps working alongside it.
 
 ## Moving a site you built locally onto the server
 

@@ -31,6 +31,22 @@ final class Git
         return trim($this->run(['rev-parse', '--short', 'HEAD'])[1]);
     }
 
+    /**
+     * Fetches the upstream of the checked-out branch and fast-forwards to it.
+     * @return bool true when HEAD moved (there was something new)
+     */
+    public function pullFastForward(): bool
+    {
+        $this->run(['fetch', '--quiet']);
+        $head = $this->run(['rev-parse', 'HEAD'])[1];
+        $upstream = $this->run(['rev-parse', '@{u}'])[1];
+        if ($head === $upstream) {
+            return false;
+        }
+        $this->run(['merge', '--ff-only', '--quiet', '@{u}']);
+        return true;
+    }
+
     /** @return array{0: int, 1: string} */
     private function run(array $args, bool $check = true): array
     {

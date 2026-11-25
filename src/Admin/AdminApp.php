@@ -27,6 +27,12 @@ use Lou\Support\Html;
  */
 final class AdminApp
 {
+    /**
+     * The admin's own policy: it frames preview pages from this origin. stubs/_lou/.htaccess repeats it,
+     * because the site-wide policy set there would otherwise win (or be combined) and block the frame.
+     */
+    public const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'self'";
+
     private const IDLE_TIMEOUT = 7200;
     private const ABSOLUTE_TIMEOUT = 43200;
     private const SELF = '/_lou/admin.php';
@@ -739,7 +745,7 @@ final class AdminApp
             'Content-Type'            => 'text/html; charset=utf-8',
             'X-Frame-Options'         => 'SAMEORIGIN',
             'Referrer-Policy'         => 'same-origin',
-            'Content-Security-Policy' => "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'self'",
+            'Content-Security-Policy' => self::CSP,
         ]);
     }
 }
