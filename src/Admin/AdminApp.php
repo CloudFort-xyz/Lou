@@ -56,6 +56,9 @@ final class AdminApp
         'POST save'           => 'editor',
         'POST image'          => 'editor',
         'POST meta'           => 'editor',
+        'POST item'           => 'editor',
+        'POST undo'           => 'editor',
+        'POST redo'           => 'editor',
         'POST page-duplicate' => 'editor',
         'POST page-delete'    => 'editor',
         'POST publish'        => 'editor',
@@ -281,6 +284,7 @@ final class AdminApp
             'site'    => $site,
             'page'    => $page,
             'preview' => Previews::urlPrefix($token) . $site->path($id, $lang),
+            'history' => (new EditHistory($this->app, $this->draft()))->state($id),
         ], 200, 'edit-layout');
     }
 
@@ -292,16 +296,18 @@ final class AdminApp
             ?? throw new LouException('Unknown page');
         return Response::json(200, ['ok' => true, 'page' => $page->id, 'lang' => $page->lang, 'title' => $page->title,
             'description' => $page->description, 'menu_label' => $page->data['menu_label'] ?? '', 'slug' => $page->slug,
-            'special' => in_array($page->id, [Page::HOME, Page::NOT_FOUND], true)]);
+            'special' => in_array($page->id, [Page::HOME, Page::NOT_FOUND], true),
+            'history' => (new EditHistory($this->app, $this->draft()))->state($page->id)]);
     }
 
     private function rPostSave(): Response
     {
         [$id, $lang] = $this->pageParams();
         $field = $this->req->input('field');
-        $this->inDraft(fn (ContentStore $c) => $c->setField($id, $lang, $field, $this->req->input('type') ?: 'text', $this->req->input('value')));
+        $this->inDraft(fn (ContentStore $c) => $c->setField($id, $lang, $field, $this->req->input('type') ?: 'text', $this->req->input('value')),
+            [$id, $lang, 'Text edit']);
         $this->db->audit('editor', 'save', "$id/$lang $field", $this->user());
-        return $this->afterChange();
+        return $this->afterChange(['field' => $field], $id);
     }
 
     private function rPostImage(): Response
@@ -323,9 +329,9 @@ final class AdminApp
                 throw new LouException('Choose an image to upload');
             }
             $c->setImage($id, $lang, $field, $image + (isset($image['src']) ? [] : ['src' => (string) \Lou\Support\Arr::get($current['fields'], "$field.src")]));
-        });
+        }, [$id, $lang, isset($image['src']) ? 'Image change' : 'Image description']);
         $this->db->audit('editor', 'image', "$id/$lang $field", $this->user());
-        return $this->afterChange();
+        return $this->afterChange([], $id);
     }
 
     private function rPostMeta(): Response
@@ -337,10 +343,46 @@ final class AdminApp
                 $meta[$k] = $this->req->input($k);
             }
         }
-        $this->inDraft(fn (ContentStore $c) => $c->setMeta($id, $lang, $meta, $this->role() === 'admin'));
+        $this->inDraft(fn (ContentStore $c) => $c->setMeta($id, $lang, $meta, $this->role() === 'admin'), [$id, $lang, 'Page settings']);
         $this->db->audit('editor', 'meta', "$id/$lang " . implode(',', array_keys($meta)), $this->user());
         $site = Site::load($this->draft()->app());
-        return $this->afterChange(['path' => $site->path($id, $lang)]);
+        return $this->afterChange(['path' => $site->path($id, $lang)], $id);
+    }
+
+    /** Duplicate, delete or move one item of a list field (data-lou-item in the editor preview). */
+    private function rPostItem(): Response
+    {
+        [$id, $lang] = $this->pageParams();
+        $item = $this->req->input('item');
+        $action = $this->req->input('action');
+        $labels = ['duplicate' => 'Duplicate', 'delete' => 'Delete', 'up' => 'Move', 'down' => 'Move'];
+        $result = ['index' => 0, 'skipped' => []];
+        $this->inDraft(function (ContentStore $c) use ($id, $lang, $item, $action, &$result): void {
+            $result = $c->itemAction($id, $lang, $item, $action);
+        }, [$id, $lang, $labels[$action] ?? 'Change']);
+        $this->db->audit('editor', 'item-' . $action, "$id/$lang $item", $this->user());
+        $list = substr($item, 0, (int) strrpos($item, '.'));
+        return $this->afterChange(['item' => $list . '.' . $result['index'], 'action' => $action, 'skipped' => $result['skipped']], $id);
+    }
+
+    private function rPostUndo(): Response
+    {
+        return $this->undoRedo(true);
+    }
+
+    private function rPostRedo(): Response
+    {
+        return $this->undoRedo(false);
+    }
+
+    private function undoRedo(bool $undo): Response
+    {
+        [$id] = $this->pageParams();
+        $h = new EditHistory($this->app, $this->draft());
+        $this->draft()->rebase();
+        $done = $undo ? $h->undo($id) : $h->redo($id);
+        $this->db->audit('editor', $undo ? 'undo' : 'redo', "$id/{$done['lang']} {$done['label']}", $this->user());
+        return $this->afterChange(['done' => $done], $id);
     }
 
     /** Copy a repeatable page (e.g. a job ad) in the draft and open the copy in the editor. */
@@ -366,9 +408,12 @@ final class AdminApp
         return Response::redirect(self::SELF . '?r=pages');
     }
 
-    private function afterChange(array $extra = []): Response
+    private function afterChange(array $extra = [], ?string $page = null): Response
     {
         (new Previews($this->app))->rebuild('draft:' . $this->owner());
+        if ($page !== null) {
+            $extra['history'] = (new EditHistory($this->app, $this->draft()))->state($page);
+        }
         return Response::json(200, ['ok' => true, 'draft' => $this->draft()->hasChanges()] + $extra);
     }
 
@@ -392,14 +437,20 @@ final class AdminApp
         return $d->siteDir();
     }
 
-    /** Run a ContentStore write against the user's draft. */
-    private function inDraft(callable $fn): void
+    /**
+     * Run a ContentStore write against the user's draft.
+     * $undo: [page id, lang, label] records the change for the editor's undo/redo.
+     */
+    private function inDraft(callable $fn, ?array $undo = null): void
     {
         $d = $this->draft();
         $d->open();
+        $history = $undo ? new EditHistory($this->app, $d) : null;
+        $before = $history?->snapshot((string) $undo[0]) ?? [];
         try {
             $fn(new ContentStore($d->app()));
             $d->touch();
+            $history?->record((string) $undo[0], (string) $undo[1], (string) $undo[2], $before, $history->snapshot((string) $undo[0]));
         } finally {
             if (!$d->hasChanges()) {
                 $d->discard();

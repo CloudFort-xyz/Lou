@@ -5,3 +5,20 @@
 [data-lou-field][contenteditable]{outline:2px solid #f79009;background:rgba(247,144,9,.06)}
 .lou-editbar{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);z-index:2147483647;background:#1d2330;color:#fff;
   font:13px/1.4 system-ui,sans-serif;padding:.45rem .8rem;border-radius:.5rem;box-shadow:0 4px 16px rgba(0,0,0,.2)}
+[data-lou-item]{transition:box-shadow .15s}
+.lou-item-on{box-shadow:0 0 0 2px rgba(43,89,195,.35)}
+.lou-flash{box-shadow:0 0 0 3px #12b76a !important}
+.lou-itembar,.lou-restore{position:absolute;z-index:2147483646;display:flex;gap:2px;align-items:center;background:#1d2330;color:#fff;
+  font:13px/1.3 system-ui,sans-serif;padding:3px;border-radius:.45rem;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.lou-itembar[hidden],.lou-restore[hidden]{display:none}
+.lou-itembar span{padding:0 .4rem}
+.lou-itembar button,.lou-restore button{all:unset;cursor:pointer;padding:.3rem .55rem;border-radius:.3rem;color:#fff;font:inherit;white-space:nowrap}
+.lou-itembar button:hover,.lou-itembar button:focus-visible,.lou-restore button:hover,.lou-restore button:focus-visible{background:#2b59c3}
+.lou-itembar button:disabled{opacity:.35;cursor:default;background:none}
+.lou-itembar .lou-danger{background:#b42318}
+.lou-restore{position:fixed;left:50%;top:1rem;transform:translateX(-50%);flex-direction:column;align-items:stretch;gap:.4rem;
+  padding:.75rem .9rem;max-width:min(32rem,calc(100vw - 2rem))}
+.lou-restore q,.lou-restore p{margin:0;opacity:.85}
+.lou-restore-actions{display:flex;flex-wrap:wrap;gap:.4rem}
+.lou-restore-actions button{background:#2b59c3}
+.lou-restore-actions button+button{background:#3a4254}

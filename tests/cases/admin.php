@@ -94,6 +94,103 @@ test('admin: sessions expire after inactivity', function () {
     check($admin->handle(admin_req('GET', 'pages', [], ['headers' => ['accept' => 'text/html']]))->status === 303, 'idle session must expire');
 });
 
+test('admin: list items can be duplicated, moved and deleted, in every language at once', function () {
+    [$admin, , $app] = admin_setup();
+    $item = fn (string $path, string $action, string $lang = 'en') => $admin->handle(admin_req('POST', 'item', ['page' => 'home', 'lang' => $lang, 'item' => $path, 'action' => $action]));
+    $titles = fn (string $lang) => array_column(Fs::readJson(draft_site($app) . "/content/pages/home/$lang.json")['fields']['features'], 'title');
+    $huBefore = array_column(Fs::readJson("{$app->siteDir}/content/pages/home/hu.json")['fields']['features'], 'title');
+
+    $r = $item('features.1', 'duplicate');
+    check($r->status === 200 && body($r)['item'] === 'features.2' && body($r)['skipped'] === [], $r->body);
+    check($titles('en') === ['Fast', 'Secure', 'Secure', 'Convenient'], implode(',', $titles('en')));
+    check($titles('hu') === [$huBefore[0], $huBefore[1], $huBefore[1], $huBefore[2]], 'each language duplicates its own item');
+    check(body($r)['history']['undo'] === 'Duplicate', 'undo offered: ' . $r->body);
+
+    $r = $item('features.0', 'down');
+    check(body($r)['item'] === 'features.1' && $titles('en') === ['Secure', 'Fast', 'Secure', 'Convenient'], implode(',', $titles('en')));
+    check($titles('hu')[1] === $huBefore[0], 'moved in hu too');
+    $item('features.3', 'up');
+    check($titles('en') === ['Secure', 'Fast', 'Convenient', 'Secure'], implode(',', $titles('en')));
+    $r = $item('features.2', 'delete');
+    check(body($r)['item'] === 'features.2' && $titles('en') === ['Secure', 'Fast', 'Secure'], implode(',', $titles('en')));
+
+    check($item('features.0', 'up')->status === 422, 'first item cannot move up');
+    check($item('features.2', 'down')->status === 422, 'last item cannot move down');
+    check($item('hero.title', 'duplicate')->status === 422, 'not a list item');
+    check($item('hero.0', 'duplicate')->status === 422, 'hero is not a list');
+    check($item('features.9', 'delete')->status === 422, 'no such item');
+    check($item('features.0', 'explode')->status === 422, 'unknown action');
+    check($item('features.0', 'duplicate', 'xx')->status === 422, 'unknown language');
+
+    $item('features.0', 'delete');
+    $item('features.0', 'delete');
+    $r = $item('features.0', 'delete');
+    check($r->status === 422 && str_contains(body($r)['message'] ?? '', 'last item'), 'the last item stays: ' . $r->body);
+
+    // a language whose list differs is left alone and reported
+    editJson(draft_site($app) . '/content/pages/home/hu.json', function ($d) { $d['fields']['features'][] = ['title' => 'Extra', 'text' => '']; return $d; });
+    $r = $item('features.0', 'duplicate');
+    check(body($r)['skipped'] === ['hu'] && count($titles('en')) === 2 && count($titles('hu')) === 2, $r->body);
+    check(count(Fs::readJson("{$app->siteDir}/content/pages/home/en.json")['fields']['features']) === 3, 'site/ untouched: edits stay in the draft');
+});
+
+test('admin: list items are marked for the editor only in edit previews', function () {
+    [$admin, , $app] = admin_setup();
+    $token = (new Previews($app))->editor('user:bence', true);
+    contains(file_get_contents($app->outputDir() . "/_lou/p/$token/en/index.html"), 'data-lou-item="features.1"');
+    check(!str_contains(file_get_contents($app->outputDir() . '/en/index.html'), 'data-lou-item'), 'live HTML has no item markers');
+    $v = new \Lou\View(\Lou\Content\Site::load($app), \Lou\Content\Site::load($app)->page('home', 'en'), \Lou\View::MODE_EDIT);
+    try {
+        $v->item('features');
+        check(false, 'a path without an index must be rejected');
+    } catch (LouException) {
+    }
+});
+
+test('admin: undo and redo step through editor changes per page and survive a reload', function () {
+    [$admin, , $app] = admin_setup();
+    $save = fn (string $value) => $admin->handle(admin_req('POST', 'save', ['page' => 'about', 'lang' => 'hu', 'field' => 'hero.title', 'type' => 'text', 'value' => $value]));
+    $title = fn () => Fs::readJson(\Lou\Content\Workspace::draft($app, 'user:bence')->app()->siteDir . '/content/pages/about/hu.json')['fields']['hero']['title'];
+    $original = $title();
+    $save('Egy');
+    $r = $save('Kettő');
+    check(body($r)['history'] === ['undo' => 'Text edit', 'redo' => null], $r->body);
+
+    $undo = fn (string $page = 'about') => $admin->handle(admin_req('POST', 'undo', ['page' => $page, 'lang' => 'hu']));
+    $redo = fn () => $admin->handle(admin_req('POST', 'redo', ['page' => 'about', 'lang' => 'hu']));
+    check($undo('contact')->status === 422, 'other pages have nothing to undo');
+    $r = $undo();
+    check($r->status === 200 && $title() === 'Egy' && body($r)['done']['label'] === 'Text edit' && body($r)['history']['redo'] === 'Text edit', $r->body);
+    $undo();
+    check($title() === $original, 'back to the original');
+    check(!\Lou\Content\Workspace::draft($app, 'user:bence')->hasChanges(), 'a draft with nothing left is discarded');
+    $r = $undo();
+    check($r->status === 422, 'nothing left to undo');
+    $redo();
+    check($title() === 'Egy', 'redo');
+
+    // the editor screen shows the state after a reload
+    $r = $admin->handle(admin_req('GET', 'edit', [], ['query' => ['page' => 'about', 'lang' => 'hu'], 'headers' => ['accept' => 'text/html']]));
+    contains($r->body, 'id="undo" data-label="Text edit"');
+    contains($r->body, 'id="redo" data-label="Text edit"');
+
+    // a new edit clears redo
+    $save('Három');
+    check(body($admin->handle(admin_req('POST', 'redo', ['page' => 'about', 'lang' => 'hu'])))['ok'] === false, 'redo cleared by a new edit');
+
+    // never overwrites a change made elsewhere since
+    editJson(draft_site($app) . '/content/pages/about/hu.json', function ($d) { $d['fields']['hero']['title'] = 'Asszisztens'; return $d; });
+    $r = $undo();
+    check($r->status === 422 && str_contains(body($r)['message'], 'changed since') && $title() === 'Asszisztens', $r->body);
+
+    // item actions undo in every language at once
+    $admin->handle(admin_req('POST', 'item', ['page' => 'home', 'lang' => 'en', 'item' => 'features.0', 'action' => 'delete']));
+    $undo('home');
+    foreach (['hu', 'en'] as $l) {
+        check(count(Fs::readJson(\Lou\Content\Workspace::draft($app, 'user:bence')->app()->siteDir . "/content/pages/home/$l.json")['fields']['features']) === 3, "undo restored $l");
+    }
+});
+
 test('admin: saving text and rich text updates content and the editor preview', function () {
     [$admin, , $app] = admin_setup();
     $r = $admin->handle(admin_req('POST', 'save', ['page' => 'about', 'lang' => 'hu', 'field' => 'hero.title', 'type' => 'text', 'value' => "Új <b>cím</b>\n"]));
