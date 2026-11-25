@@ -1,9 +1,11 @@
 ---
 # cPanel Git Version Control runs this on "Deploy HEAD Commit" (and on push, for repos that cPanel pushes to).
-# It copies Lou's code from this clone into the live install (~/lou by default), seeds site/ on the first
-# deploy only, and builds. site/, var/ and .env.php in the install are never overwritten.
+# It copies Lou's code from this clone into the live install, seeds site/ on the first deploy only, and
+# builds. site/, var/ and .env.php in the install are never overwritten.
+# The install is ~/lou, or the absolute path written in ~/.lou-target (one line), e.g.
+#   echo ~/domains/example.com > ~/.lou-target
 # Picks the first PHP 8.3+/8.4 binary found (EasyApache, then CloudLinux alt-php). Edit the list or
 # the install path if your host differs. See docs/deploy-cpanel.md.
 deployment:
   tasks:
-    - for p in /opt/cpanel/ea-php83/root/usr/bin/php /opt/cpanel/ea-php84/root/usr/bin/php /opt/alt/php83/usr/bin/php /opt/alt/php84/usr/bin/php; do if [ -x "$p" ]; then exec "$p" lou deploy "$HOME/lou"; fi; done; echo "No PHP 8.3+ binary found, edit .cpanel.yml" >&2; exit 1
+    - T=$(head -n1 "$HOME/.lou-target" 2>/dev/null); T=${T:-$HOME/lou}; for p in /opt/cpanel/ea-php83/root/usr/bin/php /opt/cpanel/ea-php84/root/usr/bin/php /opt/alt/php83/usr/bin/php /opt/alt/php84/usr/bin/php; do if [ -x "$p" ]; then exec "$p" lou deploy "$T"; fi; done; echo "No PHP 8.3+ binary found, edit .cpanel.yml" >&2; exit 1

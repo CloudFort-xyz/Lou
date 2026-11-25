@@ -59,6 +59,16 @@ The repository is private, so cPanel needs a read-only deploy key.
 
    To deploy a client branch, check it out under **Manage → Basic Information → Checked-Out Branch**.
 
+### Installing somewhere other than `~/lou`
+
+Some hosts give each domain its own folder, for example `~/domains/lou.example.com/` with the document root at `public/` inside it. That folder can be the install, as long as the clone stays elsewhere. Tell the deploy where to install with a one-line file:
+
+```sh
+echo ~/domains/lou.example.com > ~/.lou-target
+```
+
+`.cpanel.yml` reads `~/.lou-target` and installs into `~/lou` when the file is missing. Everywhere this guide says `~/lou`, read your folder instead.
+
 ## 3. First deploy
 
 In **Git Version Control → Manage → Pull or Deploy**, click **Deploy HEAD Commit**. You can also run it yourself:
