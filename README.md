@@ -35,7 +35,7 @@ On the server, point the domain's document root at `public/`. Nothing else in th
 
 `php lou check` lists missing PHP pieces (version, extensions, writable folders, config). For cPanel with Git Version Control, `.cpanel.yml` runs `php lou deploy ~/lou`, which copies the code into the live install, seeds `site/` on the first deploy only, and builds. See [docs/deploy-cpanel.md](docs/deploy-cpanel.md).
 
-Secrets (SMTP, API keys, captcha secrets) go in `.env.php` next to `site/`. See `.env.example.php`.
+Email (sender, SMTP server and password) is set by an admin under **Settings → Email**, which also sends a test email. The SMTP password is kept in `var/secrets.json` (outside the web root, mode 0600) and is never shown again. Other secrets (API keys, captcha secrets) go in `.env.php` next to `site/`. See `.env.example.php`. SMTP in `.env.php` still works, and the admin values take over once saved.
 
 ## Layout
 

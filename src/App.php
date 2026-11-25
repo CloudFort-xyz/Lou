@@ -40,7 +40,12 @@ final class App
         if (!is_array($site)) {
             throw new LouException("site/config.php must return an array");
         }
-        $config = array_replace(self::DEFAULTS, $site, $this->settings());
+        $settings = $this->settings();
+        $config = array_replace(self::DEFAULTS, $site, $settings);
+        if (isset($settings['mail'])) {
+            // the admin only sets some mail keys; keep the rest from site/config.php
+            $config['mail'] = array_replace((array) ($site['mail'] ?? []), (array) $settings['mail']);
+        }
         if (!in_array($config['default_language'], $config['languages'], true)) {
             throw new LouException("default_language '{$config['default_language']}' is not in languages");
         }
@@ -48,14 +53,21 @@ final class App
     }
 
     /** Install settings changed in the admin (var/settings.json). They override site/config.php. */
-    public const SETTINGS = ['base_url'];
+    public const SETTINGS = ['base_url', 'mail'];
+
+    /** The mail keys the admin may set (mail.transport, mail.from, mail.from_name). */
+    public const MAIL_SETTINGS = ['transport', 'from', 'from_name'];
 
     /** @return array<string, mixed> */
     public function settings(): array
     {
         $file = $this->varDir . '/settings.json';
         $data = is_file($file) ? json_decode((string) file_get_contents($file), true) : null;
-        return is_array($data) ? array_intersect_key($data, array_flip(self::SETTINGS)) : [];
+        $data = is_array($data) ? array_intersect_key($data, array_flip(self::SETTINGS)) : [];
+        if (isset($data['mail'])) {
+            $data['mail'] = array_intersect_key((array) $data['mail'], array_flip(self::MAIL_SETTINGS));
+        }
+        return $data;
     }
 
     /** True when base_url is set to something other than the example placeholder (example.com/.org/.net). */
@@ -88,6 +100,12 @@ final class App
     public function envFile(): string
     {
         return $this->root . '/.env.php';
+    }
+
+    /** Secrets saved in the admin (SMTP). Outside the web root, mode 0600, never in backups. They override .env.php. */
+    public function secretsFile(): string
+    {
+        return $this->varDir . '/secrets.json';
     }
 
     public function databaseFile(): string

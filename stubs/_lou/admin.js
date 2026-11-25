@@ -21,6 +21,15 @@
     });
   }
 
+  // SMTP settings: follow the usual port when the encryption changes (only if the port is still a default one)
+  var secure = document.getElementById('smtp-secure');
+  var port = document.getElementById('smtp-port');
+  if (secure && port) {
+    secure.addEventListener('change', function () {
+      if (['', '25', '465', '587'].indexOf(port.value) !== -1) port.value = { tls: '587', ssl: '465', '': '25' }[secure.value];
+    });
+  }
+
   document.querySelectorAll('[data-select]').forEach(function (i) {
     i.addEventListener('focus', function () { i.select(); });
   });

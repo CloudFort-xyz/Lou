@@ -57,6 +57,12 @@ test('check: example base_url fails; install warnings for missing .env.php and l
     Fs::writeJson("$root/var/settings.json", ['base_url' => 'https://lou.cloudfort.xyz']);
     $r = (new Requirements($root, fn () => true, fn () => true))->run();
     check(Requirements::passed($r) && check_item($r, 'base_url') === null, 'a base_url set in the admin passes');
+    Fs::writeJson("$root/var/settings.json", ['base_url' => 'https://lou.cloudfort.xyz', 'mail' => ['transport' => 'smtp', 'from' => 'web@pelda.hu']]);
+    $r = (new Requirements($root, fn () => true, fn () => true))->run();
+    check(check_item($r, 'mail')['level'] === Requirements::FAIL, 'SMTP without a server fails');
+    Lou\Env::storeAdminSecret(new Lou\App($root), 'smtp', ['host' => 'mail.pelda.hu', 'port' => 587]);
+    $r = (new Requirements($root, fn () => true, fn () => true))->run();
+    check(check_item($r, 'mail') === null, 'an SMTP server set in the admin passes');
 
     $elsewhere = temp_dir();
     symlink($elsewhere, "$root/public");
