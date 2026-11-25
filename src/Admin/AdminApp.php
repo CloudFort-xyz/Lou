@@ -948,13 +948,13 @@ final class AdminApp
         $name = basename($this->req->input('file'));
         $path = $this->app->varDir . "/backups/$name";
         if (!preg_match('/^[a-z0-9._-]+\.zip$/i', $name) || !is_file($path)) {
-            throw new LouException('Unknown backup');
+            throw new LouException($this->tr('Unknown backup'));
         }
         if (!unlink($path)) {
-            throw new LouException("Could not delete $name. Check the file permissions of var/backups.");
+            throw new LouException($this->tr('Could not delete {file}. Check the file permissions of var/backups.', ['file' => $name]));
         }
         $this->db->audit('admin', 'backup-delete', $name, $this->user());
-        return $this->done('backups', "Backup $name deleted.");
+        return $this->done('backups', $this->tr('Backup {file} deleted.', ['file' => $name]));
     }
 
     private function rPostRestore(): Response
