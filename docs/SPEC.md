@@ -434,6 +434,21 @@ expiry).
   children or are in the menu. Both happen in the person's draft, so nothing
   goes live until it is published. Other page types can only be created or
   removed in the repository or through an assistant.
+- **Profile and admin languages.** Every user has a Profile page (the user
+  name in the top bar) with their own preferences, stored with the user in
+  `var/users.json` under `prefs`: admin language (English or Hungarian),
+  time zone (the browser's, or a fixed IANA zone), date and time format,
+  the content language the editor opens in, the page shown after login, and
+  a password change. The admin's language is the user's choice, else
+  `admin_language` (Settings, or `site/config.php`), else the browser's
+  `Accept-Language`, else English; the login page uses the last three.
+  Translations are plain PHP arrays in `src/Admin/lang/<code>.php`, keyed by
+  the English text (`$t('Log out')`), so English needs no file and a missing
+  translation falls back to English; a test checks that every text has a
+  translation with the same placeholders and tags. Times are rendered as
+  `<time>`: in the chosen zone on the server, or in UTC for `admin.js` to
+  show in the browser's zone. These are admin-only: the public site's
+  languages and strings are unaffected.
 
 ### 8.1 Drafts, staging, publishing and history
 

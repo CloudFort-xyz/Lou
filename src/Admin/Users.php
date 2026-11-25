@@ -20,7 +20,7 @@ final class Users
     {
     }
 
-    /** @return array<string, array{hash: string, role: string, created: string}> */
+    /** @return array<string, array{hash: string, role: string, created: string, prefs?: array<string, string>}> */
     public function all(): array
     {
         return is_file($this->file) ? Fs::readJson($this->file) : [];
@@ -30,7 +30,42 @@ final class Users
     {
         self::validate($name, $password, $role);
         $users = $this->all();
-        $users[strtolower($name)] = ['hash' => password_hash($password, PASSWORD_DEFAULT), 'role' => $role, 'created' => gmdate('c')];
+        $old = $users[strtolower($name)] ?? [];
+        // adding an existing user again resets the password and role, but keeps their preferences
+        $users[strtolower($name)] = ['hash' => password_hash($password, PASSWORD_DEFAULT), 'role' => $role, 'created' => $old['created'] ?? gmdate('c')]
+            + (isset($old['prefs']) ? ['prefs' => $old['prefs']] : []);
+        $this->save($users);
+    }
+
+    public function prefs(string $name): Prefs
+    {
+        return Prefs::fromArray((array) ($this->all()[strtolower($name)]['prefs'] ?? []));
+    }
+
+    public function setPrefs(string $name, Prefs $prefs): void
+    {
+        $users = $this->all();
+        if (!isset($users[strtolower($name)])) {
+            throw new LouException("No such user: $name");
+        }
+        $users[strtolower($name)]['prefs'] = $prefs->toArray();
+        if (!$users[strtolower($name)]['prefs']) {
+            unset($users[strtolower($name)]['prefs']);
+        }
+        $this->save($users);
+    }
+
+    /** Change a user's own password; the current one must be right. */
+    public function changePassword(string $name, string $current, string $new): void
+    {
+        if ($this->verify($name, $current) === null) {
+            throw new LouException('The current password is wrong.');
+        }
+        if (mb_strlen($new) < self::MIN_PASSWORD) {
+            throw new LouException('Passwords must be at least ' . self::MIN_PASSWORD . ' characters');
+        }
+        $users = $this->all();
+        $users[strtolower($name)]['hash'] = password_hash($new, PASSWORD_DEFAULT);
         $this->save($users);
     }
 

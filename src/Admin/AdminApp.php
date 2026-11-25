@@ -50,6 +50,9 @@ final class AdminApp
         'GET login'           => null,
         'POST login'          => null,
         'POST logout'         => 'editor',
+        'GET profile'         => 'editor',
+        'POST profile'        => 'editor',
+        'POST password'       => 'editor',
         'GET dashboard'       => 'editor',
         'GET pages'           => 'editor',
         'GET edit'            => 'editor',
@@ -95,6 +98,7 @@ final class AdminApp
         'POST settings'       => 'admin',
         'POST mail-settings'  => 'admin',
         'POST mail-test'      => 'admin',
+        'POST admin-language' => 'admin',
         'GET updates'         => 'admin',
         'POST update-check'   => 'admin',
         'POST update'         => 'admin',
@@ -107,6 +111,8 @@ final class AdminApp
     private Request $req;
     private ?Integrations $integrations = null;
     private ?Updater $updater = null;
+    private ?I18n $i18n = null;
+    private ?Prefs $prefs = null;
 
     public function __construct(
         private readonly App $app,
@@ -119,6 +125,8 @@ final class AdminApp
     public function handle(Request $req): Response
     {
         $this->req = $req;
+        $this->i18n = null;
+        $this->prefs = null;
         $route = (string) ($req->query['r'] ?? 'dashboard');
         $key = "{$req->method} $route";
         if (!array_key_exists($key, self::ROUTES)) {
@@ -128,7 +136,7 @@ final class AdminApp
 
         if ($need !== null) {
             if (!$this->user()) {
-                return $req->wantsJson() ? Response::json(401, ['ok' => false, 'message' => 'Please log in again'])
+                return $req->wantsJson() ? Response::json(401, ['ok' => false, 'message' => $this->tr('Please log in again')])
                     : Response::redirect(self::SELF . '?r=login');
             }
             if ($need === 'admin' && $this->role() !== 'admin') {
@@ -137,7 +145,7 @@ final class AdminApp
         }
         if ($req->method === 'POST') {
             if (!$this->sameOrigin() || ($route !== 'login' && !hash_equals($this->csrf(), $req->input('_csrf') ?: $req->header('x-lou-csrf')))) {
-                return $req->wantsJson() ? Response::json(403, ['ok' => false, 'message' => 'Security check failed, reload the page']) : $this->deny();
+                return $req->wantsJson() ? Response::json(403, ['ok' => false, 'message' => $this->tr('Security check failed, reload the page')]) : $this->deny();
             }
         }
 
@@ -146,8 +154,8 @@ final class AdminApp
             return $this->$method();
         } catch (LouException $e) {
             return $req->wantsJson()
-                ? Response::json(422, ['ok' => false, 'message' => $e->getMessage()])
-                : $this->page('Error', 'message', ['message' => $e->getMessage(), 'error' => true]);
+                ? Response::json(422, ['ok' => false, 'message' => $this->tr($e->getMessage())])
+                : $this->page($this->tr('Error'), 'message', ['message' => $this->tr($e->getMessage()), 'error' => true]);
         }
     }
 
@@ -158,7 +166,7 @@ final class AdminApp
         if ($this->user()) {
             return Response::redirect(self::SELF);
         }
-        return $this->page('Log in', 'login', ['error' => null]);
+        return $this->page($this->tr('Log in'), 'login', ['error' => null]);
     }
 
     private function rPostLogin(): Response
@@ -167,14 +175,14 @@ final class AdminApp
         $t = $this->time();
         $tries = (int) $this->db->run('SELECT COUNT(*) FROM rate_limits WHERE key = ? AND ts > ?', [$ipKey, $t - 900])->fetchColumn();
         if ($tries >= 10) {
-            return $this->page('Log in', 'login', ['error' => 'Too many attempts. Try again in 15 minutes.'], 429);
+            return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('Too many attempts. Try again in 15 minutes.')], 429);
         }
         $name = trim($this->req->input('user'));
         $role = (new Users($this->app->varDir . '/users.json'))->verify($name, $this->req->input('password'));
         if ($role === null) {
             $this->db->run('INSERT INTO rate_limits (key, ts) VALUES (?, ?)', [$ipKey, $t]);
             $this->db->audit('admin', 'login-failed', null, mb_substr($name, 0, 64));
-            return $this->page('Log in', 'login', ['error' => 'Wrong user name or password.'], 401);
+            return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('Wrong user name or password.')], 401);
         }
         $this->session->regenerate();
         $this->session->set('user', strtolower($name));
@@ -183,13 +191,100 @@ final class AdminApp
         $this->session->set('seen', $t);
         $this->session->set('csrf', bin2hex(random_bytes(32)));
         $this->db->audit('admin', 'login', null, strtolower($name));
-        return Response::redirect(self::SELF);
+        $start = $this->users()->prefs($name)->startPage;
+        return Response::redirect(self::SELF . ($start !== '' ? "?r=$start" : ''));
     }
 
     private function rPostLogout(): Response
     {
         $this->session->destroy();
         return Response::redirect(self::SELF . '?r=login');
+    }
+
+    // ---------------------------------------------------------------- profile (every user, their own)
+
+    private function rGetProfile(): Response
+    {
+        $site = Site::load($this->app);
+        return $this->page($this->tr('Profile'), 'profile', [
+            'prefs'         => $this->prefs(),
+            'languages'     => I18n::LANGUAGES,
+            'siteLanguage'  => $this->siteAdminLanguage(),
+            'contentLanguages' => $site->languages(),
+            'defaultContentLanguage' => $site->defaultLanguage(),
+            'timezones'     => \DateTimeZone::listIdentifiers(),
+            'formats'       => Prefs::DATE_FORMATS,
+            'sample'        => $this->time(),
+        ]);
+    }
+
+    private function rPostProfile(): Response
+    {
+        $in = fn (string $k): string => $this->req->input($k);
+        $prefs = Prefs::fromArray(['lang' => $in('lang'), 'timezone' => $in('timezone'), 'date_format' => $in('date_format'),
+            'edit_lang' => $in('edit_lang'), 'start_page' => $in('start_page')]);
+        if ($in('timezone') !== '' && $prefs->timezone === '') {
+            throw new LouException($this->tr('Unknown time zone: {tz}', ['tz' => $in('timezone')]));
+        }
+        $this->users()->setPrefs((string) $this->user(), $prefs);
+        $this->db->audit('admin', 'profile', implode(', ', array_map(fn ($k, $v) => "$k=$v", array_keys($prefs->toArray()), $prefs->toArray())) ?: 'defaults', $this->user());
+        // the notice is shown in the newly chosen language
+        $this->prefs = $prefs;
+        $this->i18n = null;
+        return $this->done('profile', $this->tr('Your preferences were saved.'));
+    }
+
+    private function rPostPassword(): Response
+    {
+        $new = $this->req->input('new_password');
+        if ($new !== $this->req->input('new_password2')) {
+            throw new LouException($this->tr('The two new passwords are not the same.'));
+        }
+        $this->users()->changePassword((string) $this->user(), $this->req->input('current_password'), $new);
+        $this->db->audit('admin', 'password', null, $this->user());
+        return $this->done('profile', $this->tr('Your password was changed.'));
+    }
+
+    private function users(): Users
+    {
+        return new Users($this->app->varDir . '/users.json');
+    }
+
+    /** The signed-in user's preferences (defaults when logged out). */
+    private function prefs(): Prefs
+    {
+        if ($this->prefs === null) {
+            $user = $this->session->get('user');
+            $this->prefs = is_string($user) ? $this->users()->prefs($user) : new Prefs();
+        }
+        return $this->prefs;
+    }
+
+    /** The site-wide admin language: 'admin_language' in site/config.php or Settings, else none. */
+    private function siteAdminLanguage(): string
+    {
+        $lang = (string) ($this->app->config['admin_language'] ?? '');
+        return isset(I18n::LANGUAGES[$lang]) ? $lang : '';
+    }
+
+    /** The user's language, else the site's, else the browser's (Accept-Language), else English. */
+    private function i18n(): I18n
+    {
+        return $this->i18n ??= I18n::load($this->prefs()->lang ?: $this->siteAdminLanguage()
+            ?: (I18n::negotiate($this->req->header('accept-language')) ?? 'en'));
+    }
+
+    /** Translated plain text (see I18n): escape it where it is output. */
+    private function tr(string $message, array $vars = []): string
+    {
+        return $this->i18n()->plain($message, $vars);
+    }
+
+    /** The content language the editor opens in: the user's choice if the site has it, else the site default. */
+    private function editLang(Site $site): string
+    {
+        $l = $this->prefs()->editLang;
+        return $l !== '' && in_array($l, $site->languages(), true) ? $l : $site->defaultLanguage();
     }
 
     private function user(): ?string
@@ -239,7 +334,7 @@ final class AdminApp
         $staging = Workspace::staging($this->app);
         $since = gmdate('Y-m-d', $this->time() - 7 * 86400);
         $live = is_file($this->app->varDir . '/live.json') ? Fs::readJson($this->app->varDir . '/live.json') : null;
-        return $this->page('Dashboard', 'dashboard', [
+        return $this->page($this->tr('Dashboard'), 'dashboard', [
             'site'        => $site,
             'pageCount'   => count($ids),
             'submissions' => (int) $this->db->run('SELECT COUNT(*) FROM submissions')->fetchColumn(),
@@ -273,22 +368,22 @@ final class AdminApp
             $row['repeatable'] = $store->isRepeatable($row['id']);
         }
         unset($row);
-        return $this->page('Pages', 'pages', ['rows' => $rows, 'site' => $site, 'warnings' => $site->warnings()]);
+        return $this->page($this->tr('Pages'), 'pages', ['rows' => $rows, 'site' => $site, 'warnings' => $site->warnings()]);
     }
 
     private function rGetEdit(): Response
     {
         $this->draft()->rebase();
         $site = Site::load($this->draft()->app());
-        $lang = (string) ($this->req->query['lang'] ?? $site->defaultLanguage());
+        $lang = (string) ($this->req->query['lang'] ?? $this->editLang($site));
         $id = (string) ($this->req->query['page'] ?? Page::HOME);
-        $page = $site->page($id, $lang) ?? throw new LouException("Page '$id' does not exist in '$lang'");
+        $page = $site->page($id, $lang) ?? throw new LouException($this->tr("Page '{page}' does not exist in '{lang}'", ['page' => $id, 'lang' => $lang]));
         $token = (new Previews($this->app))->editor($this->owner(), true);
-        return $this->page('Edit: ' . $page->title, 'edit', [
+        return $this->page($this->tr('Edit: {title}', ['title' => $page->title]), 'edit', [
             'site'    => $site,
             'page'    => $page,
             'preview' => Previews::urlPrefix($token) . $site->path($id, $lang),
-            'history' => (new EditHistory($this->app, $this->draft()))->state($id),
+            'history' => $this->historyState($id),
         ], 200, 'edit-layout');
     }
 
@@ -297,11 +392,11 @@ final class AdminApp
     {
         $site = Site::load($this->draft()->app());
         $page = $site->page((string) ($this->req->query['page'] ?? ''), (string) ($this->req->query['lang'] ?? ''))
-            ?? throw new LouException('Unknown page');
+            ?? throw new LouException($this->tr('Unknown page'));
         return Response::json(200, ['ok' => true, 'page' => $page->id, 'lang' => $page->lang, 'title' => $page->title,
             'description' => $page->description, 'menu_label' => $page->data['menu_label'] ?? '', 'slug' => $page->slug,
             'special' => in_array($page->id, [Page::HOME, Page::NOT_FOUND], true),
-            'history' => (new EditHistory($this->app, $this->draft()))->state($page->id)]);
+            'history' => $this->historyState($page->id)]);
     }
 
     private function rPostSave(): Response
@@ -322,7 +417,7 @@ final class AdminApp
         $file = $this->req->files['file'] ?? null;
         if (is_array($file) && ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
             if ($file['error'] !== UPLOAD_ERR_OK || !$this->isUploaded((string) $file['tmp_name'])) {
-                throw new LouException('Upload failed (the file may be too large for the server)');
+                throw new LouException($this->tr('Upload failed (the file may be too large for the server)'));
             }
             $image += (new ImageProcessor((int) ($this->app->config['admin']['image_max_width'] ?? 1920)))
                 ->process((string) $file['tmp_name'], (string) $file['name'], $this->draftDir());
@@ -330,7 +425,7 @@ final class AdminApp
         $this->inDraft(function (ContentStore $c) use ($id, $lang, $field, $image): void {
             $current = $c->read($id, $lang);
             if (!isset($image['src']) && !is_array(\Lou\Support\Arr::get($current['fields'] ?? [], $field))) {
-                throw new LouException('Choose an image to upload');
+                throw new LouException($this->tr('Choose an image to upload'));
             }
             $c->setImage($id, $lang, $field, $image + (isset($image['src']) ? [] : ['src' => (string) \Lou\Support\Arr::get($current['fields'], "$field.src")]));
         }, [$id, $lang, isset($image['src']) ? 'Image change' : 'Image description']);
@@ -386,6 +481,7 @@ final class AdminApp
         $this->draft()->rebase();
         $done = $undo ? $h->undo($id) : $h->redo($id);
         $this->db->audit('editor', $undo ? 'undo' : 'redo', "$id/{$done['lang']} {$done['label']}", $this->user());
+        $done['label'] = $this->tr($done['label']);
         return $this->afterChange(['done' => $done], $id);
     }
 
@@ -399,7 +495,7 @@ final class AdminApp
         });
         $this->db->audit('editor', 'duplicate', "$id → $new", $this->user());
         (new Previews($this->app))->rebuild('draft:' . $this->owner());
-        return Response::redirect(self::SELF . '?r=edit&page=' . rawurlencode($new) . '&lang=' . rawurlencode((string) $this->app->config['default_language']));
+        return Response::redirect(self::SELF . '?r=edit&page=' . rawurlencode($new) . '&lang=' . rawurlencode($this->editLang(Site::load($this->draft()->app()))));
     }
 
     /** Delete a repeatable page in the draft; it goes live through review and publish like any edit. */
@@ -409,14 +505,20 @@ final class AdminApp
         $this->inDraft(fn (ContentStore $c) => $c->deletePage($id));
         $this->db->audit('editor', 'delete', $id, $this->user());
         (new Previews($this->app))->rebuild('draft:' . $this->owner());
-        return $this->done('pages', 'The page was deleted in your draft. It disappears from the site when your changes are published.');
+        return $this->done('pages', $this->tr('The page was deleted in your draft. It disappears from the site when your changes are published.'));
+    }
+
+    /** The next undo/redo steps of a page, labelled in the admin language (labels: see inDraft() callers). */
+    private function historyState(string $page): array
+    {
+        return array_map(fn (?string $l) => $l === null ? null : $this->tr($l), (new EditHistory($this->app, $this->draft()))->state($page));
     }
 
     private function afterChange(array $extra = [], ?string $page = null): Response
     {
         (new Previews($this->app))->rebuild('draft:' . $this->owner());
         if ($page !== null) {
-            $extra['history'] = (new EditHistory($this->app, $this->draft()))->state($page);
+            $extra['history'] = $this->historyState($page);
         }
         return Response::json(200, ['ok' => true, 'draft' => $this->draft()->hasChanges()] + $extra);
     }
@@ -468,15 +570,15 @@ final class AdminApp
         $d = $this->draft();
         $d->rebase();
         if (!$d->hasChanges()) {
-            throw new LouException('Your draft has no changes to submit.');
+            throw new LouException($this->tr('Your draft has no changes to submit.'));
         }
         $conflicts = $d->conflicts();
         if ($conflicts && $this->req->input('force') !== '1') {
-            return $this->page('Conflict', 'conflict', ['conflicts' => $conflicts, 'summary' => $this->req->input('summary')], 409);
+            return $this->page($this->tr('Conflict'), 'conflict', ['conflicts' => $conflicts, 'summary' => $this->req->input('summary')], 409);
         }
         $files = $this->submitDraft($d, $this->req->input('summary'), $this->req->input('force') === '1', $ready);
-        return $this->done('review', 'Submitted ' . self::plural(count($files), 'change') . ' to staging.'
-            . ($ready ? ' The preview is ready.' : ''));
+        return $this->done('review', $this->tr('Submitted {n} change to staging.|Submitted {n} changes to staging.', ['n' => count($files)])
+            . ($ready ? ' ' . $this->tr('The preview is ready.') : ''));
     }
 
     /**
@@ -503,7 +605,7 @@ final class AdminApp
         $files ? $this->draft()->revert($files) : $this->draft()->discard();
         (new Previews($this->app))->rebuild('draft:' . $this->owner());
         $this->db->audit('editor', 'revert', $files ? implode(', ', $files) : 'all', $this->user());
-        return $this->done('review', $files ? 'Undid ' . self::plural(count($files), 'change') . ' in your draft.' : 'Your draft was discarded.');
+        return $this->done('review', $files ? $this->tr('Undid {n} change in your draft.|Undid {n} changes in your draft.', ['n' => count($files)]) : $this->tr('Your draft was discarded.'));
     }
 
     private function rGetReview(): Response
@@ -518,14 +620,14 @@ final class AdminApp
             }
         }
         $vars = ['open' => $s->exists(), 'drafts' => $drafts, 'live' => is_file($this->app->varDir . '/live.json') ? Fs::readJson($this->app->varDir . '/live.json') : null,
-            'mine' => $mine->hasChanges() ? ['items' => ChangeList::of($mine, $md = $mine->diffs()), 'diffs' => $md, 'conflicts' => $mine->conflicts()] : null];
+            'mine' => $mine->hasChanges() ? ['items' => ChangeList::of($mine, $md = $mine->diffs(), $this->i18n()->plain(...)), 'diffs' => $md, 'conflicts' => $mine->conflicts()] : null];
         if ($s->exists()) {
             $diffs = $s->diffs();
-            $vars += ['meta' => $s->meta(), 'diffs' => $diffs, 'items' => ChangeList::of($s, $diffs), 'problems' => $s->validate(),
+            $vars += ['meta' => $s->meta(), 'diffs' => $diffs, 'items' => ChangeList::of($s, $diffs, $this->i18n()->plain(...)), 'problems' => $s->validate(),
                 'conflicts' => $s->conflicts(), 'preview' => $s->lastPreview()];
             $vars['views'] = $this->previewLinks($s, $vars['items'], $vars['preview']);
         }
-        return $this->page('Review', 'review', $vars);
+        return $this->page($this->tr('Review'), 'review', $vars);
     }
 
     /**
@@ -557,11 +659,11 @@ final class AdminApp
         $s = Workspace::staging($this->app);
         $problems = $s->validate();
         if ($problems) {
-            throw new LouException('Staging has problems:', $problems);
+            throw new LouException($this->tr('Staging has problems:'), $problems);
         }
         $p = (new Previews($this->app))->stable('staging', 'staging', $this->user());
         $s->recordPreview($this->app->siteUrl($this->req) . Previews::urlPrefix($p['token']) . '/', $p['result']);
-        return $this->done('review', 'The preview is up to date.');
+        return $this->done('review', $this->tr('The preview is up to date.'));
     }
 
     /** Staging → site/ → live build. Without staging, just builds site/ (e.g. after redirect changes). */
@@ -574,7 +676,7 @@ final class AdminApp
         if ($s->exists()) {
             $meta = $s->meta();
             if ($this->req->input('rev') !== (string) $meta['rev']) {
-                throw new LouException('Staging changed while you were reviewing it. Review it again.');
+                throw new LouException($this->tr('Staging changed while you were reviewing it. Review it again.'));
             }
             $safety = basename((new Backup($this->app))->create(null, null, 30));
             $history = new History($this->app);
@@ -602,12 +704,12 @@ final class AdminApp
                 ? strtok($meta['submissions'][0]['summary'], "\n") : 'Publish ' . count($applied) . ' changed files';
             try {
                 $hash = (new Git($this->app->root))->commit($subject . "\n\n" . implode("\n", $lines) . "\n\nPublished by {$this->user()} in Lou.", (string) $this->user());
-                $git = $hash ? "Committed to Git as $hash." : null;
+                $git = $hash ? $this->tr('Committed to Git as {hash}.', ['hash' => $hash]) : null;
             } catch (LouException $e) {
-                $result['warnings'][] = 'The Git commit failed: ' . $e->getMessage();
+                $result['warnings'][] = $this->tr('The Git commit failed: {error}', ['error' => $e->getMessage()]);
             }
         }
-        return $this->page('Published', 'published', ['result' => $result, 'applied' => $applied, 'git' => $git, 'safety' => $safety]);
+        return $this->page($this->tr('Published'), 'published', ['result' => $result, 'applied' => $applied, 'git' => $git, 'safety' => $safety]);
     }
 
     private function rPostShare(): Response
@@ -625,7 +727,7 @@ final class AdminApp
     private function rPostRevoke(): Response
     {
         (new Previews($this->app))->revoke($this->req->input('token'));
-        return $this->done('builds', 'The preview link was revoked. It stops working right away.');
+        return $this->done('builds', $this->tr('The preview link was revoked. It stops working right away.'));
     }
 
     // ---------------------------------------------------------------- submissions
@@ -636,14 +738,14 @@ final class AdminApp
         $where = $form !== '' ? 'WHERE form = ?' : '';
         $rows = $this->db->run("SELECT id, form, lang, status, created_at, data FROM submissions $where ORDER BY id DESC LIMIT 200", $form !== '' ? [$form] : [])->fetchAll();
         $forms = $this->db->run('SELECT form, COUNT(*) AS n FROM submissions GROUP BY form ORDER BY form')->fetchAll();
-        return $this->page('Submissions', 'submissions', ['rows' => $rows, 'forms' => $forms, 'form' => $form]);
+        return $this->page($this->tr('Submissions'), 'submissions', ['rows' => $rows, 'forms' => $forms, 'form' => $form]);
     }
 
     private function rGetSubmission(): Response
     {
         $row = $this->db->run('SELECT * FROM submissions WHERE id = ?', [(int) ($this->req->query['id'] ?? 0)])->fetch()
-            ?: throw new LouException('Submission not found');
-        return $this->page('Submission #' . $row['id'], 'submission', ['row' => $row]);
+            ?: throw new LouException($this->tr('Submission not found'));
+        return $this->page($this->tr('Submission #{id}', ['id' => $row['id']]), 'submission', ['row' => $row]);
     }
 
     private function rGetExport(): Response
@@ -674,13 +776,13 @@ final class AdminApp
         $id = (int) $this->req->input('id');
         $this->db->run('DELETE FROM submissions WHERE id = ?', [$id]);
         $this->db->audit('admin', 'delete-submission', (string) $id, $this->user());
-        return $this->done('submissions', 'The submission was deleted.');
+        return $this->done('submissions', $this->tr('The submission was deleted.'));
     }
 
     private function rGetSubscribers(): Response
     {
         $rows = $this->db->run('SELECT * FROM subscribers ORDER BY id DESC LIMIT 500')->fetchAll();
-        return $this->page('Subscribers', 'subscribers', ['rows' => $rows]);
+        return $this->page($this->tr('Subscribers'), 'subscribers', ['rows' => $rows]);
     }
 
     // ---------------------------------------------------------------- builds, backups, redirects
@@ -690,7 +792,9 @@ final class AdminApp
         $env = Env::load($this->app);
         $smtp = (array) $env->get('smtp', []);
         $mail = (array) ($this->app->config['mail'] ?? []);
-        return $this->page('Settings', 'settings', $extra + [
+        return $this->page($this->tr('Settings'), 'settings', $extra + [
+            'adminLanguage' => (string) ($this->app->config['admin_language'] ?? ''),
+            'adminLanguageSaved' => isset($this->req->query['language-saved']),
             'current'    => (string) $this->app->config['base_url'],
             'configured' => $this->app->baseUrlConfigured(),
             'suggested'  => $this->req->origin(),
@@ -735,19 +839,19 @@ final class AdminApp
     {
         $to = trim($this->req->input('to'));
         if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
-            throw new LouException('Enter the address the test email should go to');
+            throw new LouException($this->tr('Enter the address the test email should go to'));
         }
         $app = new App($this->app->root);
-        $result = ['ok' => true, 'message' => "Test email sent to $to. Check the inbox (and the spam folder)."];
+        $result = ['ok' => true, 'message' => $this->tr('Test email sent to {to}. Check the inbox (and the spam folder).', ['to' => $to])];
         try {
             $integrations = $this->integrations ?? new Integrations($app, Env::load($app));
             if (($app->config['mail']['transport'] ?? 'smtp') === 'log') {
-                $result['message'] = "Emails are set to 'write to a log file', so the test went to var/mail.log, not to $to.";
+                $result['message'] = $this->tr("Emails are set to 'write to a log file', so the test went to var/mail.log, not to {to}.", ['to' => $to]);
             }
             $integrations->mailer()->send(new Message([$to], '[' . $app->config['name'] . '] Lou test email',
                 "This is a test email from the Lou admin of {$app->config['name']}.\n\nIf you can read this, form emails will arrive too.\n\nSent by {$this->user()} at " . gmdate('Y-m-d H:i') . " UTC."));
         } catch (LouException $e) {
-            $result = ['ok' => false, 'message' => $e->getMessage()];
+            $result = ['ok' => false, 'message' => $this->tr($e->getMessage())];
         }
         $this->db->audit('admin', 'mail-test', ($result['ok'] ? 'ok ' : 'failed ') . $to, $this->user());
         return $this->rGetSettings(['testResult' => $result, 'testTo' => $to]);
@@ -757,6 +861,24 @@ final class AdminApp
     public function useIntegrations(Integrations $integrations): void
     {
         $this->integrations = $integrations;
+    }
+
+    /** The site-wide default admin language (users can still pick their own under Profile). */
+    private function rPostAdminLanguage(): Response
+    {
+        $lang = $this->req->input('admin_language');
+        if ($lang !== '' && !isset(I18n::LANGUAGES[$lang])) {
+            throw new LouException($this->tr('Unknown language'));
+        }
+        $settings = $this->app->settings();
+        if ($lang === '') {
+            unset($settings['admin_language']);
+        } else {
+            $settings['admin_language'] = $lang;
+        }
+        Fs::writeJson($this->app->varDir . '/settings.json', $settings);
+        $this->db->audit('admin', 'settings', 'admin_language ' . ($lang ?: 'auto'), $this->user());
+        return Response::redirect(self::SELF . '?r=settings&language-saved=1#admin-language');
     }
 
     private function rPostSettings(): Response
@@ -789,7 +911,7 @@ final class AdminApp
     {
         $u = $this->updater();
         $updated = is_file($this->app->varDir . '/updated.json') ? Fs::readJson($this->app->varDir . '/updated.json') : null;
-        return $this->page('Updates', 'updates', $extra + [
+        return $this->page($this->tr('Updates'), 'updates', $extra + [
             'version'    => App::VERSION,
             'blocked'    => $u->blocked(),
             'signed'     => $u->signaturesChecked(),
@@ -830,7 +952,7 @@ final class AdminApp
     {
         $file = $this->req->files['release'] ?? null;
         if (!is_array($file) || ($file['error'] ?? 1) !== UPLOAD_ERR_OK || !$this->isUploaded((string) $file['tmp_name'])) {
-            throw new LouException('Upload a Lou release .zip (lou-<version>.zip)');
+            throw new LouException($this->tr('Upload a Lou release .zip (lou-<version>.zip)'));
         }
         $u = $this->updater();
         $info = $u->inspect((string) $file['tmp_name']);
@@ -850,10 +972,10 @@ final class AdminApp
     private function unsignedUpload(Updater $u, array $file, array $info): Response
     {
         $why = $info['signature'] === 'invalid'
-            ? 'This zip’s signature does not match Lou’s release key (it may have been changed), so it was not installed.'
-            : 'This zip is not signed with Lou’s release key, so it was not installed.';
+            ? $this->tr('This zip’s signature does not match Lou’s release key (it may have been changed), so it was not installed.')
+            : $this->tr('This zip is not signed with Lou’s release key, so it was not installed.');
         if (!$u->unsignedAllowed()) {
-            throw new LouException($why . " If you trust it (for example a test build you made), someone with FTP or SSH access can add 'allow_unsigned_updates' => true to .env.php. You will then be asked to confirm with a security warning.");
+            throw new LouException($why . ' ' . $this->tr('If you trust it (for example a test build you made), someone with FTP or SSH access can add {setting} to .env.php. You will then be asked to confirm with a security warning.', ['setting' => "'allow_unsigned_updates' => true"]));
         }
         $dir = $this->app->varDir . '/updates';
         foreach (glob("$dir/unsigned-*.zip") ?: [] as $old) {
@@ -864,10 +986,10 @@ final class AdminApp
         $token = bin2hex(random_bytes(16));
         Fs::ensureDir($dir);
         if (!copy((string) $file['tmp_name'], "$dir/unsigned-$token.zip")) {
-            throw new LouException('Cannot store the uploaded zip');
+            throw new LouException($this->tr('Cannot store the uploaded zip'));
         }
         $this->session->set('unsignedUpload', $token);
-        return $this->page('Unsigned release', 'update-unsigned', [
+        return $this->page($this->tr('Unsigned release'), 'update-unsigned', [
             'version'    => $info['version'],
             'signature'  => $info['signature'],
             'current'    => App::VERSION,
@@ -884,12 +1006,12 @@ final class AdminApp
         $zip = $this->app->varDir . "/updates/unsigned-$token.zip";
         if (!preg_match('/^[a-f0-9]{32}$/', $token) || !hash_equals((string) $this->session->get('unsignedUpload', ''), $token)
             || !is_file($zip) || filemtime($zip) < time() - 3600) {
-            throw new LouException('This upload has expired. Upload the zip again.');
+            throw new LouException($this->tr('This upload has expired. Upload the zip again.'));
         }
         $u = $this->updater();
         $info = $u->inspect($zip);
         if (trim($this->req->input('confirm')) !== $info['version']) {
-            throw new LouException("To install it, type the version exactly: {$info['version']}");
+            throw new LouException($this->tr('To install it, type the version exactly: {version}', ['version' => $info['version']]));
         }
         try {
             $r = $u->apply($zip, $this->req->input('allow_older') === '1', true);
@@ -906,7 +1028,7 @@ final class AdminApp
     {
         $file = $this->req->files['site'] ?? null;
         if (!is_array($file) || ($file['error'] ?? 1) !== UPLOAD_ERR_OK || !$this->isUploaded((string) $file['tmp_name'])) {
-            throw new LouException('Upload a site .zip');
+            throw new LouException($this->tr('Upload a site .zip'));
         }
         $name = mb_substr(basename(str_replace('\\', '/', (string) ($file['name'] ?? ''))), 0, 100) ?: 'a zip';
         $draft = $this->draft();
@@ -917,7 +1039,7 @@ final class AdminApp
             . count($r['skipped']) . ' skipped, ' . count($r['rejected']) . ' rejected', $this->user());
         $r += ['name' => $name, 'submitted' => false, 'held' => null, 'ready' => false];
         if (!$r['written'] && !$r['deleted']) {
-            return $this->page('Site design', 'design-import', $r);
+            return $this->page($this->tr('Site design'), 'design-import', $r);
         }
         // Straight to staging when asked and the draft held nothing else, so the reviewer gets a ready preview.
         // Otherwise it waits in the draft, and the result page says why.
@@ -929,7 +1051,7 @@ final class AdminApp
         };
         if ($r['held'] === false) {
             try {
-                $this->submitDraft($draft, "Site design from $name", false, $ready);
+                $this->submitDraft($draft, $this->tr('Site design from {name}', ['name' => $name]), false, $ready);
                 $r['submitted'] = true;
                 $r['ready'] = (bool) $ready;
             } catch (LouException $e) {
@@ -940,10 +1062,11 @@ final class AdminApp
         if (!$r['submitted']) {
             (new Previews($this->app))->rebuild('draft:' . $this->owner());
         } elseif (!$r['skipped'] && !$r['rejected']) {
-            return $this->done('review', 'The new design from ' . $name . ' is on staging (' . self::plural(count($r['written']) + count($r['deleted']), 'change') . ').'
-                . ($r['ready'] ? ' Check the preview, then publish.' : ''));
+            return $this->done('review', $this->tr('The new design from {name} is on staging ({changes}).', ['name' => $name,
+                'changes' => $this->tr('{n} change|{n} changes', ['n' => count($r['written']) + count($r['deleted'])])])
+                . ($r['ready'] ? ' ' . $this->tr('Check the preview, then publish.') : ''));
         }
-        return $this->page('Site design', 'design-import', $r);
+        return $this->page($this->tr('Site design'), 'design-import', $r);
     }
 
     /** Rebuild the live site and previews with the code on disk (after an update). */
@@ -952,7 +1075,7 @@ final class AdminApp
         $r = (new Builder(new App($this->app->root)))->build();
         (new Previews($this->app))->rebuildAll();
         $this->db->audit('admin', 'rebuild', $r['id'], $this->user());
-        return $this->page('Rebuilt', 'message', ['message' => "The site was rebuilt with Lou " . App::VERSION . " ({$r['pages']} pages)."]);
+        return $this->page($this->tr('Rebuilt'), 'message', ['message' => $this->tr('The site was rebuilt with Lou {version} ({n} pages).', ['version' => App::VERSION, 'n' => $r['pages']])]);
     }
 
     private function rGetBuilds(): Response
@@ -960,14 +1083,14 @@ final class AdminApp
         $builds = array_reverse(array_map('basename', glob($this->app->varDir . '/builds/before-*', GLOB_ONLYDIR) ?: []));
         $live = is_file($this->app->varDir . '/live.json') ? Fs::readJson($this->app->varDir . '/live.json') : null;
         $previews = array_filter((new Previews($this->app))->all(), fn ($p) => in_array($p['kind'], ['share', 'live'], true));
-        return $this->page('Builds', 'builds', ['builds' => $builds, 'live' => $live, 'previews' => $previews]);
+        return $this->page($this->tr('Builds'), 'builds', ['builds' => $builds, 'live' => $live, 'previews' => $previews]);
     }
 
     private function rPostRollback(): Response
     {
         $name = $this->req->input('build');
         if (!preg_match('/^before-[0-9]{8}-[0-9]{6}-[a-f0-9]{6}$/', $name) || !is_dir($this->app->varDir . "/builds/$name")) {
-            throw new LouException('Unknown build');
+            throw new LouException($this->tr('Unknown build'));
         }
         $out = $this->app->outputDir();
         $output = new Output($this->app);
@@ -984,8 +1107,7 @@ final class AdminApp
         }
         @unlink($this->app->varDir . '/live.json');
         $this->db->audit('admin', 'rollback', $name, $this->user());
-        return $this->page('Rolled back', 'message', ['message' => "The live site was restored to the build $name. "
-            . 'Your current content is unchanged; publishing again will build from it.']);
+        return $this->page($this->tr('Rolled back'), 'message', ['message' => $this->tr('The live site was restored to the build {build}. Your current content is unchanged; publishing again will build from it.', ['build' => $name])]);
     }
 
     private function rGetBackups(): Response
@@ -995,14 +1117,14 @@ final class AdminApp
         foreach ($files as $f) {
             $sizes[$f] = filesize($this->app->varDir . "/backups/$f");
         }
-        return $this->page('Backups', 'backups', ['files' => $files, 'sizes' => $sizes]);
+        return $this->page($this->tr('Backups'), 'backups', ['files' => $files, 'sizes' => $sizes]);
     }
 
     private function rPostBackup(): Response
     {
         $file = (new Backup($this->app))->create(null, null, 30);
         $this->db->audit('admin', 'backup', basename($file), $this->user());
-        return $this->done('backups', 'Backup created: ' . basename($file) . '.');
+        return $this->done('backups', $this->tr('Backup created: {file}.', ['file' => basename($file)]));
     }
 
     private function rGetDownload(): Response
@@ -1010,7 +1132,7 @@ final class AdminApp
         $name = basename((string) ($this->req->query['file'] ?? ''));
         $path = $this->app->varDir . "/backups/$name";
         if (!preg_match('/^[a-z0-9._-]+\.zip$/i', $name) || !is_file($path)) {
-            throw new LouException('Unknown backup');
+            throw new LouException($this->tr('Unknown backup'));
         }
         return new Response(200, (string) file_get_contents($path), [
             'Content-Type' => 'application/zip', 'Content-Disposition' => "attachment; filename=\"$name\"",
@@ -1022,20 +1144,20 @@ final class AdminApp
         $name = basename($this->req->input('file'));
         $path = $this->app->varDir . "/backups/$name";
         if (!preg_match('/^[a-z0-9._-]+\.zip$/i', $name) || !is_file($path)) {
-            throw new LouException('Unknown backup');
+            throw new LouException($this->tr('Unknown backup'));
         }
         if (!unlink($path)) {
-            throw new LouException("Could not delete $name. Check the file permissions of var/backups.");
+            throw new LouException($this->tr('Could not delete {file}. Check the file permissions of var/backups.', ['file' => $name]));
         }
         $this->db->audit('admin', 'backup-delete', $name, $this->user());
-        return $this->done('backups', "Backup $name deleted.");
+        return $this->done('backups', $this->tr('Backup {file} deleted.', ['file' => $name]));
     }
 
     private function rPostRestore(): Response
     {
         $file = $this->req->files['backup'] ?? null;
         if (!is_array($file) || ($file['error'] ?? 1) !== UPLOAD_ERR_OK || !$this->isUploaded((string) $file['tmp_name'])) {
-            throw new LouException('Upload a backup .zip');
+            throw new LouException($this->tr('Upload a backup .zip'));
         }
         $password = $this->req->input('password') ?: null;
         $staging = Workspace::staging($this->app);
@@ -1045,21 +1167,19 @@ final class AdminApp
         $this->db->audit('admin', 'restore', basename($r['safety']) . ' → staging: ' . count($r['files']) . ' files', $this->user());
         $previews = new Previews($this->app);
         if ($r['files'] === []) {
-            return $this->done('backups', 'The backup’s content is the same as the live site, so nothing was put on Review.'
-                . ' The current state was saved as ' . basename($r['safety']) . '.');
+            return $this->done('backups', $this->tr('The backup’s content is the same as the live site, so nothing was put on Review. The current state was saved as {file}.', ['file' => basename($r['safety'])]));
         }
         $staging->addSubmission($this->owner(), "Restore from $name", $r['files']);
         $p = $previews->staging($this->app->siteUrl($this->req), $this->user());
         $previews->rebuild(null, $p ? [$p['token']] : []);
-        return $this->done('review', 'The backup is on Review (' . self::plural(count($r['files']), 'change') . '). Check the preview, then publish.'
-            . ' The current state was saved as ' . basename($r['safety']) . '.');
+        return $this->done('review', $this->tr('The backup is on Review ({n} change). Check the preview, then publish. The current state was saved as {file}.|The backup is on Review ({n} changes). Check the preview, then publish. The current state was saved as {file}.', ['n' => count($r['files']), 'file' => basename($r['safety'])]));
     }
 
     private function rGetRedirects(): Response
     {
         $file = $this->app->siteDir . '/redirects.json';
         $site = Site::load($this->app);
-        return $this->page('Redirects', 'redirects', ['entries' => is_file($file) ? Fs::readJson($file) : [], 'site' => $site]);
+        return $this->page($this->tr('Redirects'), 'redirects', ['entries' => is_file($file) ? Fs::readJson($file) : [], 'site' => $site]);
     }
 
     private function rPostRedirect(): Response
@@ -1071,7 +1191,7 @@ final class AdminApp
         $entries = array_values(array_filter($entries, fn ($e) => $e['from'] !== $from));
         if ($action !== 'delete') {
             if (!preg_match('#^/[^\s"\\\\]*\z#', $from) || preg_match('#(^|/)\.\.?(/|$)#', $from)) {
-                throw new LouException("Redirect sources must start with '/' and contain no spaces, quotes or ./.. segments");
+                throw new LouException($this->tr("Redirect sources must start with '/' and contain no spaces, quotes or ./.. segments"));
             }
             $entry = ['from' => $from];
             if ($action === '410') {
@@ -1091,10 +1211,10 @@ final class AdminApp
         Fs::writeJson($file, $entries);
         $this->db->audit('admin', 'redirect', "$action $from", $this->user());
         return $this->done('redirects', match ($action) {
-            'delete' => "Redirect from $from deleted.",
-            '410'    => "$from now answers 410 Gone.",
-            default  => "Redirect from $from saved.",
-        } . ' It goes live with the next publish.');
+            'delete' => $this->tr('Redirect from {from} deleted. It goes live with the next publish.', ['from' => $from]),
+            '410'    => $this->tr('{from} now answers 410 Gone. It goes live with the next publish.', ['from' => $from]),
+            default  => $this->tr('Redirect from {from} saved. It goes live with the next publish.', ['from' => $from]),
+        });
     }
 
     // ---------------------------------------------------------------- assistants
@@ -1108,7 +1228,7 @@ final class AdminApp
         $previews->revokeSource('staging');
         $previews->rebuild();
         $this->db->audit('editor', 'reject-staging', implode(', ', $files), $this->user());
-        return $this->done('review', 'Everything on staging was discarded. The live site was not touched.');
+        return $this->done('review', $this->tr('Everything on staging was discarded. The live site was not touched.'));
     }
 
     /** Take single changes back off staging (they return to the live version); the rest stays for review. */
@@ -1117,7 +1237,7 @@ final class AdminApp
         $s = Workspace::staging($this->app);
         $files = array_values(array_intersect(array_filter((array) ($this->req->post['files'] ?? []), 'is_string'), $s->changedFiles()));
         if (!$files) {
-            throw new LouException('That change is no longer on staging.');
+            throw new LouException($this->tr('That change is no longer on staging.'));
         }
         $s->revert($files);
         $previews = new Previews($this->app);
@@ -1130,7 +1250,7 @@ final class AdminApp
             $previews->rebuild(null, $p ? [$p['token']] : []);
         }
         $this->db->audit('editor', 'unstage', implode(', ', $files), $this->user());
-        return $this->done('review', 'Took ' . self::plural(count($files), 'change') . ' off staging. The live site was not touched.');
+        return $this->done('review', $this->tr('Took {n} change off staging. The live site was not touched.|Took {n} changes off staging. The live site was not touched.', ['n' => count($files)]));
     }
 
     // ---------------------------------------------------------------- history
@@ -1139,14 +1259,14 @@ final class AdminApp
     {
         $h = new History($this->app);
         $path = (string) ($this->req->query['file'] ?? '');
-        return $this->page('History', 'history', ['entries' => $h->all($path !== '' ? $path : null), 'file' => $path, 'enabled' => $h->enabled()]);
+        return $this->page($this->tr('History'), 'history', ['entries' => $h->all($path !== '' ? $path : null), 'file' => $path, 'enabled' => $h->enabled()]);
     }
 
     private function rGetHistoryEntry(): Response
     {
         $h = new History($this->app);
         $id = (string) ($this->req->query['id'] ?? '');
-        return $this->page('History', 'history-entry', ['entry' => $h->get($id), 'diffs' => $h->diffs($id)]);
+        return $this->page($this->tr('History'), 'history-entry', ['entry' => $h->get($id), 'diffs' => $h->diffs($id)]);
     }
 
     /** Put old (or new) versions from a history entry into my draft; they go live through the usual submit + publish. */
@@ -1157,7 +1277,7 @@ final class AdminApp
         $done = (new History($this->app))->restoreInto($this->draft(), $this->req->input('id'), $side, $files ?: null);
         (new Previews($this->app))->rebuild('draft:' . $this->owner());
         $this->db->audit('editor', 'history-restore', $this->req->input('id') . " $side: " . implode(', ', $done), $this->user());
-        return $this->done('review', 'Put ' . self::plural(count($done), 'file') . ' into your draft. Submit it to make it live.');
+        return $this->done('review', $this->tr('Put {n} file into your draft. Submit it to make it live.|Put {n} files into your draft. Submit it to make it live.', ['n' => count($done)]));
     }
 
     private function rGetAssistants(): Response
@@ -1167,7 +1287,7 @@ final class AdminApp
         if ($new !== null) {
             $this->session->set('new_token', null);
         }
-        return $this->page('Assistants', 'assistants', ['tokens' => $this->tokens()->all(), 'newToken' => is_string($new) ? $new : null]);
+        return $this->page($this->tr('Assistants'), 'assistants', ['tokens' => $this->tokens()->all(), 'newToken' => is_string($new) ? $new : null]);
     }
 
     private function rPostTokenAdd(): Response
@@ -1182,7 +1302,7 @@ final class AdminApp
     {
         $this->tokens()->revoke($this->req->input('id'));
         $this->db->audit('admin', 'token-revoke', $this->req->input('id'), $this->user());
-        return $this->done('assistants', 'The token was revoked. The assistant using it has lost access.');
+        return $this->done('assistants', $this->tr('The token was revoked. The assistant using it has lost access.'));
     }
 
     private function tokens(): Tokens
@@ -1216,33 +1336,15 @@ final class AdminApp
         return Response::redirect(self::SELF . '?r=' . $route);
     }
 
-    private static function plural(int $n, string $word): string
-    {
-        return $n . ' ' . $word . ($n === 1 ? '' : 's');
-    }
-
-    /**
-     * A timestamp as <time>: readable UTC in the HTML, and admin.js shows it in the browser's own time zone.
-     * Takes an ISO date, a SQLite "Y-m-d H:i:s" (UTC) or a Unix time.
-     */
+    /** A timestamp as <time> with the default preferences (UTC, admin.js localises it). See Prefs::stamp(). */
     public static function stamp(string|int|null $at, bool $dateOnly = false): string
     {
-        if ($at === null || $at === '') {
-            return '';
-        }
-        try {
-            $d = is_int($at) ? new \DateTimeImmutable("@$at") : new \DateTimeImmutable($at, new \DateTimeZone('UTC'));
-        } catch (\Exception) {
-            return Html::escape((string) $at);
-        }
-        $d = $d->setTimezone(new \DateTimeZone('UTC'));
-        return '<time datetime="' . $d->format('Y-m-d\\TH:i:s\\Z') . '"' . ($dateOnly ? ' data-date' : '') . '>'
-            . $d->format($dateOnly ? 'Y-m-d' : 'Y-m-d H:i') . ($dateOnly ? '' : ' UTC') . '</time>';
+        return (new Prefs())->stamp($at, $dateOnly, 'en');
     }
 
     private function deny(): Response
     {
-        return $this->page('Not allowed', 'message', ['message' => 'You are not allowed to do that.', 'error' => true], 403);
+        return $this->page($this->tr('Not allowed'), 'message', ['message' => $this->tr('You are not allowed to do that.'), 'error' => true], 403);
     }
 
     private function time(): int
@@ -1278,7 +1380,17 @@ final class AdminApp
             'needsRebuild' => $this->session->get('user') ? Updater::needsRebuild($this->app) : false,
             'louVersion'  => App::VERSION,
             'flash'       => $this->takeFlash(),
-            'time'        => self::stamp(...),
+        ];
+        $t = $this->i18n();
+        $prefs = $this->prefs();
+        $vars += [
+            't'           => $t,
+            'uiLang'      => $t->lang,
+            'datePatterns' => $prefs->patterns($t->lang),
+            'time'        => static fn (string|int|null $at, bool $dateOnly = false): string => $prefs->stamp($at, $dateOnly, $t->lang),
+            // "user:bence" → "bence", "llm:Claude" → "Claude (assistant)"
+            'who'         => static fn (string $owner): string => str_starts_with($owner, 'llm:')
+                ? $t->plain('{name} (assistant)', ['name' => substr($owner, 4)]) : (string) preg_replace('/^user:/', '', $owner),
         ];
         $render = static function (string $__file, array $__vars) use ($e): string {
             extract($__vars, EXTR_SKIP);
