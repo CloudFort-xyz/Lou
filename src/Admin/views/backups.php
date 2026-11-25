@@ -18,7 +18,11 @@ $madeAt = static fn (string $f): string => preg_match('/-(\d{4})(\d{2})(\d{2})-(
   <?php foreach ($files as $f): ?>
     <tr><td><?= $madeAt($f) ?></td><td><code><?= $e($f) ?></code><?php if (str_starts_with($f, 'before-restore-')): ?> <span class="badge badge-muted">before a restore</span><?php endif ?></td>
       <td><?= $e(number_format($sizes[$f] / 1024, 0)) ?> KB</td>
-      <td class="cell-actions"><a class="btn" href="<?= $self ?>?r=download&amp;file=<?= $e(rawurlencode($f)) ?>">Download</a></td></tr>
+      <td class="cell-actions"><a class="btn" href="<?= $self ?>?r=download&amp;file=<?= $e(rawurlencode($f)) ?>">Download</a>
+        <form method="post" action="<?= $self ?>?r=backup-delete" class="inline" data-confirm="Delete the backup <?= $e($f) ?> permanently? Download it first if you might need it.">
+          <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+          <input type="hidden" name="file" value="<?= $e($f) ?>">
+          <button class="btn btn-danger" type="submit">Delete</button></form></td></tr>
   <?php endforeach ?>
   </tbody>
 </table>
