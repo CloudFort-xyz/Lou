@@ -19,6 +19,7 @@ final class Request
         public readonly array $headers = [],
         public readonly string $ip = '',
         public readonly int $contentLength = 0,
+        public readonly array $files = [],
     ) {
     }
 
@@ -37,6 +38,7 @@ final class Request
             headers: $headers,
             ip: (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
             contentLength: (int) ($_SERVER['CONTENT_LENGTH'] ?? 0),
+            files: $_FILES,
         );
     }
 

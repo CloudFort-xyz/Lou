@@ -1,0 +1,7 @@
+/* Injected into the admin's editor preview only. */
+[data-lou-field]{outline:1px dashed rgba(43,89,195,.45);outline-offset:3px;cursor:text;transition:outline-color .15s}
+[data-lou-field]:hover{outline:2px solid #2b59c3}
+[data-lou-type=image]{cursor:pointer}
+[data-lou-field][contenteditable]{outline:2px solid #f79009;background:rgba(247,144,9,.06)}
+.lou-editbar{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);z-index:2147483647;background:#1d2330;color:#fff;
+  font:13px/1.4 system-ui,sans-serif;padding:.45rem .8rem;border-radius:.5rem;box-shadow:0 4px 16px rgba(0,0,0,.2)}

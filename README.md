@@ -11,12 +11,14 @@ See [docs/SPEC.md](docs/SPEC.md) for the full design.
 ## Status
 
 - Milestone 1 (skeleton): a multilingual static builder, the template helper, automatic redirects, single-file backups and the CLI.
+- Milestone 3 (admin): `/_lou/admin.php` with login, click-to-edit text, rich text and images in a live preview, page settings, publish, shareable preview links, submissions/subscribers, redirects, builds and rollback, and backups.
 - Milestone 2 (forms): one submit endpoint for all forms, SQLite storage, SMTP via bundled PHPMailer, Mailchimp/MailerLite/webhook newsletter sign-ups, webhooks, layered spam protection with optional Turnstile/reCAPTCHA, and progressive-enhancement JS.
 
 ## Quick start
 
 ```sh
 php lou build           # build site/ into public/ (atomic swap)
+php lou user add NAME --role=admin   # create an admin user, then open /_lou/admin.php
 php lou serve           # build a preview and serve it on http://localhost:8000
 php lou backup          # single-file backup into var/backups/
 php lou restore FILE    # restore a backup (the current state is backed up first)

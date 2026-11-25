@@ -10,6 +10,7 @@ use Lou\Db\Database;
 use Lou\Env;
 use Lou\Forms\FormProcessor;
 use Lou\Integrations;
+use Lou\Admin\Users;
 use Lou\LouException;
 use Lou\View;
 
@@ -37,6 +38,21 @@ function lou_args(array $argv): array
         }
     }
     return [$pos, $opt];
+}
+
+function lou_prompt_password(): string
+{
+    echo 'Password: ';
+    $tty = function_exists('posix_isatty') && posix_isatty(STDIN);
+    if ($tty) {
+        shell_exec('stty -echo');
+    }
+    $p = rtrim((string) fgets(STDIN), "\r\n");
+    if ($tty) {
+        shell_exec('stty echo');
+        echo "\n";
+    }
+    return $p;
 }
 
 function lou_forms(App $app): FormProcessor
@@ -116,6 +132,26 @@ try {
             }
             break;
 
+        case 'user':
+            $users = new Users($app->varDir . '/users.json');
+            $sub = $pos[1] ?? 'list';
+            if ($sub === 'list') {
+                foreach ($users->all() as $name => $u) {
+                    echo str_pad($name, 24) . str_pad($u['role'], 8) . $u['created'] . "\n";
+                }
+            } elseif ($sub === 'add') {
+                $name = $pos[2] ?? throw new LouException('Usage: php lou user add NAME [--role=admin|editor] [--password=…]');
+                $password = is_string($opt['password'] ?? null) ? $opt['password'] : lou_prompt_password();
+                $users->add($name, $password, is_string($opt['role'] ?? null) ? $opt['role'] : 'editor');
+                echo "User $name saved\n";
+            } elseif ($sub === 'remove') {
+                $users->remove($pos[2] ?? throw new LouException('Usage: php lou user remove NAME'));
+                echo "User removed\n";
+            } else {
+                throw new LouException('Usage: php lou user list|add|remove');
+            }
+            break;
+
         case 'version':
             echo 'Lou ' . App::VERSION . "\n";
             break;
@@ -136,6 +172,8 @@ try {
                                               Restore a backup (current state is backed up first), then rebuild
               retry                           Re-run failed actions (email, newsletter, webhook) of stored submissions
               submissions [--form=ID]         Export submissions as CSV to stdout
+              user list|add NAME [--role=admin]|remove NAME
+                                              Manage admin users (add prompts for the password)
               version                         Show the version
 
             Global: --root=DIR to run against another install.

@@ -78,10 +78,10 @@ test('escapes text, sanitises rich text, adds lang + hreflang', function () {
     check(!str_contains($en, 'data-lou-field'), 'live build must not contain editor markers');
 });
 
-test('preview builds carry editor markers and noindex', function () {
+test('edit previews carry editor markers and noindex', function () {
     $root = install();
     $out = "$root/var/preview";
-    (new Builder(new App($root)))->build(View::MODE_PREVIEW, $out);
+    (new Builder(new App($root)))->build(View::MODE_EDIT, $out);
     contains(file_get_contents("$out/index.html"), 'data-lou-field="hero.title"');
     contains(file_get_contents("$out/robots.txt"), 'Disallow: /');
     contains(file_get_contents("$out/.htaccess"), 'X-Robots-Tag');
