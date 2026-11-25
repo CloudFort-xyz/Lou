@@ -276,10 +276,16 @@ definition up. Unknown ids are rejected.
   `subscribe` (NewsletterProvider) and `webhook` (generic JSON POST). If an
   action after `store` fails, the submission is kept and marked for retry,
   and the admin shows the failure.
-- **Spam protection** applies to every form: a honeypot field, a minimum
-  fill time (signed timestamp), a per-IP plus per-form rate limit (SQLite),
-  an `Origin`/`Referer` check, and **optional captcha** (Cloudflare
-  Turnstile or Google reCAPTCHA v3), verified server-side.
+- **Spam protection** applies to every form: a honeypot field (bots get a
+  fake success), a minimum fill time, a per-visitor plus per-form rate limit
+  (SQLite, IPs stored only as keyed hashes), an `Origin`/`Referer` check,
+  and **optional captcha** (Cloudflare Turnstile or Google reCAPTCHA v3),
+  verified server-side.
+- **Minimum fill time:** `forms.js` fetches a signed timestamp token
+  (`GET /_lou/submit.php?token=<form>`) when the visitor first touches the
+  form. Submissions that arrive too fast, or with a forged or foreign token,
+  get a fake success. Visitors without JS send no token and are still
+  accepted, unless the form sets `'require_token' => true`.
 - Forms work **without JavaScript** (plain POST, then a redirect to the
   success page in the visitor's language). With JS they submit via `fetch`,
   get JSON back, and show inline messages. Error texts come from

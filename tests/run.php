@@ -56,7 +56,7 @@ function editJson(string $file, callable $fn): void
 test('builds every page in both languages with pretty URLs', function () {
     $root = install();
     $r = (new Builder(new App($root)))->build();
-    check($r['pages'] === 10, "expected 10 pages, got {$r['pages']}");
+    check($r['pages'] === 12, "expected 12 pages, got {$r['pages']}");
     foreach (['index.html', 'rolunk/index.html', 'kapcsolat/index.html', 'en/index.html',
               'en/about-us/index.html', 'en/contact/index.html', '404.html', 'en/404.html',
               'sitemap.xml', 'robots.txt', '.htaccess', 'en/.htaccess', 'assets/css/site.css', '_lou/.htaccess'] as $f) {
@@ -252,6 +252,10 @@ test('slugs and file names are transliterated to ASCII', function () {
     check(Lou\Support\Str::slug('Példa Kft. – Árvíztűrő tükörfúrógép') === 'pelda-kft-arvizturo-tukorfurogep', Lou\Support\Str::slug('Példa Kft. – Árvíztűrő tükörfúrógép'));
     check(Lou\Support\Str::fileName('Árvíz KÉP.JPG') === 'arviz-kep.jpg', Lou\Support\Str::fileName('Árvíz KÉP.JPG'));
 });
+
+foreach (glob(__DIR__ . '/cases/*.php') ?: [] as $case) {
+    require $case;
+}
 
 // ------------------------------------------------------------------------- run
 

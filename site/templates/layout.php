@@ -16,5 +16,6 @@
 <?= $v->content() ?>
 </main>
 <?= $v->partial('footer') ?>
+<?= $v->scripts() ?>
 </body>
 </html>

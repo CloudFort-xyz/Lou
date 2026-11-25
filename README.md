@@ -10,7 +10,8 @@ See [docs/SPEC.md](docs/SPEC.md) for the full design.
 
 ## Status
 
-This is milestone 1, the skeleton: a multilingual static builder, the template helper, automatic redirects, single-file backups, the CLI and tests.
+- Milestone 1 (skeleton): a multilingual static builder, the template helper, automatic redirects, single-file backups and the CLI.
+- Milestone 2 (forms): one submit endpoint for all forms, SQLite storage, SMTP via bundled PHPMailer, Mailchimp/MailerLite/webhook newsletter sign-ups, webhooks, layered spam protection with optional Turnstile/reCAPTCHA, and progressive-enhancement JS.
 
 ## Quick start
 
@@ -19,10 +20,14 @@ php lou build           # build site/ into public/ (atomic swap)
 php lou serve           # build a preview and serve it on http://localhost:8000
 php lou backup          # single-file backup into var/backups/
 php lou restore FILE    # restore a backup (the current state is backed up first)
+php lou submissions     # export form submissions as CSV
+php lou retry           # re-run failed email/newsletter/webhook actions
 php tests/run.php       # run the tests
 ```
 
 On the server, point the domain's document root at `public/`. Nothing else in the repo should be web-accessible.
+
+Secrets (SMTP, API keys, captcha secrets) go in `.env.php` next to `site/`. See `.env.example.php`.
 
 ## Layout
 
@@ -39,3 +44,4 @@ public/        build output = web root, gitignored
 
 - `site/content/pages/<page-id>/<lang>.json` is one file per page per language. The page id never changes, and the `slug` is per language.
 - Templates are plain PHP using `$v`: `$v->text('hero.title')`, `$v->url('contact')`, `$v->t('form.send')`, `$v->editable('hero.title')`.
+- Forms: define them under `forms` in `site/config.php`, then use `<form<?= $v->formAttrs('contact') ?>><?= $v->formFields('contact') ?> … <?= $v->captcha('contact') ?></form>`.

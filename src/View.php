@@ -20,6 +20,7 @@ final class View
     public const MODE_PREVIEW = 'preview';
 
     private ?string $layout = null;
+    private bool $needsFormsJs = false;
     private string $content = '';
     /** @var array<string, string> */
     private array $assetHashes = [];
@@ -159,6 +160,62 @@ final class View
             $out .= ' ' . $k . '="' . Html::escape($val) . '"';
         }
         return $out . $this->editable($path) . '>';
+    }
+
+    // ------------------------------------------------------------ forms
+
+    /**
+     * Hidden fields every Lou form needs (form id, language, token slot, honeypot).
+     * Use inside <form method="post" action="/_lou/submit.php" data-lou-form>.
+     */
+    public function formFields(string $formId): string
+    {
+        if (!isset($this->site->app->config['forms'][$formId])) {
+            throw new LouException("Template uses unknown form '$formId' (define it under 'forms' in site/config.php)");
+        }
+        $this->needsFormsJs = true;
+        return '<input type="hidden" name="form" value="' . Html::escape($formId) . '">'
+            . '<input type="hidden" name="lang" value="' . Html::escape($this->page->lang) . '">'
+            . '<input type="hidden" name="_token" value="">'
+            . '<div class="lou-hp" aria-hidden="true"><label>Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>';
+    }
+
+    /** Captcha widget for the form, if one is configured for it. Prints nothing otherwise. */
+    public function captcha(string $formId): string
+    {
+        $type = $this->site->app->config['forms'][$formId]['captcha'] ?? null;
+        if (!$type) {
+            return '';
+        }
+        $key = (string) Arr::get($this->site->app->config, "captcha.$type.site_key", '');
+        if ($key === '') {
+            throw new LouException("Form '$formId' uses captcha '$type' but captcha.$type.site_key is not set in site/config.php");
+        }
+        $this->needsFormsJs = true;
+        return match ($type) {
+            'turnstile' => '<div class="cf-turnstile" data-sitekey="' . Html::escape($key) . '" data-language="' . Html::escape($this->page->lang) . '"></div>'
+                . '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>',
+            'recaptcha' => '<input type="hidden" name="g-recaptcha-response" value="">'
+                . '<script src="https://www.google.com/recaptcha/api.js?render=' . rawurlencode($key) . '" async defer></script>',
+            default     => throw new LouException("Unknown captcha '$type'"),
+        };
+    }
+
+    /** Attributes for the <form> tag: method, action and data hooks for forms.js. */
+    public function formAttrs(string $formId): string
+    {
+        $attrs = ' method="post" action="/_lou/submit.php" data-lou-form';
+        $type = $this->site->app->config['forms'][$formId]['captcha'] ?? null;
+        if ($type === 'recaptcha') {
+            $attrs .= ' data-lou-recaptcha="' . Html::escape((string) Arr::get($this->site->app->config, 'captcha.recaptcha.site_key', '')) . '"';
+        }
+        return $attrs;
+    }
+
+    /** Script tags needed by the page (only pages with forms load forms.js). Call at the end of the layout. */
+    public function scripts(): string
+    {
+        return $this->needsFormsJs ? '<script src="/_lou/forms.js" defer></script>' : '';
     }
 
     // ------------------------------------------------------------ site-wide

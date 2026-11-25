@@ -1,0 +1,3 @@
+PHPMailer v6.12.0 (https://github.com/PHPMailer/PHPMailer), LGPL-2.1.
+Only PHPMailer.php, SMTP.php and Exception.php are bundled, unmodified.
+Loaded by Lou\Mail\PhpMailerMailer; no Composer needed.
