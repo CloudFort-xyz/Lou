@@ -1038,12 +1038,21 @@ final class AdminApp
             throw new LouException('Upload a backup .zip');
         }
         $password = $this->req->input('password') ?: null;
-        $safety = (new Backup($this->app))->restore((string) $file['tmp_name'], $password, $this->req->input('content_only') === '');
+        $staging = Workspace::staging($this->app);
+        $r = (new Backup($this->app))->restoreToStaging((string) $file['tmp_name'], $password, $this->req->input('content_only') === '', $staging);
         $this->db = new Database($this->app->databaseFile());
-        $this->db->audit('admin', 'restore', basename($safety), $this->user());
-        (new Previews($this->app))->rebuildAll();
-        return $this->page('Restored', 'message', ['message' => 'The backup was restored. The previous state was saved as '
-            . basename($safety) . '. Check the preview, then publish.']);
+        $name = mb_substr(basename(str_replace('\\', '/', (string) ($file['name'] ?? ''))), 0, 100) ?: 'a backup';
+        $this->db->audit('admin', 'restore', basename($r['safety']) . ' → staging: ' . count($r['files']) . ' files', $this->user());
+        $previews = new Previews($this->app);
+        if ($r['files'] === []) {
+            return $this->done('backups', 'The backup’s content is the same as the live site, so nothing was put on Review.'
+                . ' The current state was saved as ' . basename($r['safety']) . '.');
+        }
+        $staging->addSubmission($this->owner(), "Restore from $name", $r['files']);
+        $p = $previews->staging($this->app->siteUrl($this->req), $this->user());
+        $previews->rebuild(null, $p ? [$p['token']] : []);
+        return $this->done('review', 'The backup is on Review (' . self::plural(count($r['files']), 'change') . '). Check the preview, then publish.'
+            . ' The current state was saved as ' . basename($r['safety']) . '.');
     }
 
     private function rGetRedirects(): Response
@@ -1061,13 +1070,16 @@ final class AdminApp
         $action = $this->req->input('action');
         $entries = array_values(array_filter($entries, fn ($e) => $e['from'] !== $from));
         if ($action !== 'delete') {
-            if (!preg_match('#^/[^\s"]*$#', $from)) {
-                throw new LouException("Redirect sources must start with '/'");
+            if (!preg_match('#^/[^\s"\\\\]*\z#', $from) || preg_match('#(^|/)\.\.?(/|$)#', $from)) {
+                throw new LouException("Redirect sources must start with '/' and contain no spaces, quotes or ./.. segments");
             }
             $entry = ['from' => $from];
             if ($action === '410') {
                 $entry['status'] = 410;
             } elseif (preg_match('#^https?://#', $this->req->input('url'))) {
+                if (!\Lou\Build\Redirects::safeTarget($this->req->input('url'))) {
+                    throw new LouException('The address may not contain spaces, quotes, backslashes or line breaks');
+                }
                 $entry['to'] = $this->req->input('url');
             } else {
                 [$pid, $plang] = array_pad(explode('|', $this->req->input('target'), 2), 2, '');

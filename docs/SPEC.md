@@ -286,7 +286,10 @@ came from the editor, an LLM or a hand edit over FTP.
   `public/.htaccess`, with a documented nginx `map` snippet as an
   alternative. For hosts without either, the old path also gets a tiny
   static HTML file with `<meta http-equiv="refresh">` and a canonical link.
-- Redirect loops and redirects that shadow a live URL are build errors.
+- Redirect loops and redirects that shadow a live URL are build errors, and so
+  are sources or targets with whitespace, quotes, backslashes or control
+  characters (they would break out of the `.htaccess` line) and sources with
+  `.`/`..` segments (the fallback page must stay inside the build).
 
 ## 7. Runtime endpoint for the site (`public/_lou/submit.php`)
 
@@ -520,12 +523,16 @@ There's a **single-file backup and restore** of everything that makes up the sit
 - **Secrets** (`.env.php`) are **excluded by default**. They can be
   included only with a password, in which case the zip is AES-256 encrypted
   via `ZipArchive`.
-- **Restore:** `php lou restore <file>` or an upload in the admin. Lou
-  validates the manifest and checksums, **automatically backs up the current
-  state first**, then restores into **staging** so you get a preview link and
-  a redirect report before anything goes live. Approving it swaps it in and
-  rebuilds, exactly like an LLM changeset. The database restore can be
-  skipped (content only).
+- **Restore:** an upload in the admin, or `php lou restore <file>`. Lou
+  validates the manifest and checksums and **automatically backs up the
+  current state first**. The admin restores into **staging** (refused while
+  something else is on staging), so you get a preview link and a redirect
+  report before anything goes live, and publishing it works like any other
+  change. Because a backup is a zip anyone could have made, its templates and
+  `config.php` get the same `TemplateGuard` checks as an assistant's, and
+  dotfiles or PHP outside `templates/` and `config.php` are refused. The
+  database is restored right away (it can be skipped: content only). The CLI
+  restore needs shell access and replaces `site/` directly.
 - **Scheduled:** an optional cron (`php lou backup --keep=14`) keeps the
   last N backups in `var/backups/` (outside the web root). Backups are also
   downloadable from the admin.
@@ -599,8 +606,10 @@ without approval.
   calls, plain variables, loops and conditions, and a list of pure string,
   array, math and date functions. Rejected: any other function, `new`,
   static calls, include/require, eval, backticks, superglobals, closures,
-  variable variables and functions, dynamic member names, method calls on
-  anything but `$v`. Parse errors are reported.
+  variable variables and functions, calls whose callee is a value (`'f'()`,
+  `('f')()`, `$a[0]()`, `$v->field('f')()`), first-class callables `f(...)`,
+  dynamic member names, method calls on anything but `$v`. Parse errors are
+  reported.
 - JSON must parse. SVG must not contain scripts, event handlers,
   `javascript:`, `foreignObject` or entities. `config.php` must return an
   array, and the whole staged site must load (`Site::load`) before a preview

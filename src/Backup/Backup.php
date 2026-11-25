@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Lou\Backup;
 
 use Lou\App;
+use Lou\Bridge\PathPolicy;
+use Lou\Content\Workspace;
 use Lou\LouException;
 use Lou\Support\Fs;
 use Lou\Support\Str;
@@ -133,6 +135,67 @@ final class Backup
         } finally {
             Fs::removeDir($tmp);
         }
+    }
+
+    /**
+     * The admin's restore: the backup's site/ goes onto staging, so it is previewed and published through Review
+     * like any other change (the CLI's restore() replaces site/ directly). A backup is a zip anyone could have
+     * made, so its templates and config.php get the same checks as an assistant's, and it may not contain
+     * dotfiles (an assets/.htaccess would be copied into the web root) or PHP outside templates/ and config.php.
+     * The database, which is not part of the site, is restored right away unless $withDatabase is false.
+     *
+     * @return array{safety: string, files: list<string>} the safety backup and the files that differ from the live site
+     */
+    public function restoreToStaging(string $file, ?string $password, bool $withDatabase, Workspace $staging): array
+    {
+        if ($staging->exists()) {
+            throw new LouException('Something is waiting on Review. Publish or reject it first, then restore the backup.');
+        }
+        $tmp = $this->app->varDir . '/.restore-' . bin2hex(random_bytes(4));
+        $manifest = $this->extractAndVerify($file, $password, $tmp);
+        try {
+            $problems = self::check("$tmp/site");
+            if ($problems) {
+                throw new LouException('This backup was not restored, because it contains files Lou does not accept:', $problems);
+            }
+            $safety = $this->create($this->backupDir() . '/before-restore-' . gmdate('Ymd-His') . '.zip');
+            $staging->open();
+            Fs::removeDir($staging->siteDir());
+            if (!rename("$tmp/site", $staging->siteDir())) {
+                $staging->discard();
+                throw new LouException('Cannot move the restored site onto staging');
+            }
+            $staging->touch();
+            $files = $staging->changedFiles();
+            if ($files === []) {
+                $staging->discard();
+            }
+            if ($withDatabase && isset($manifest['files']['lou.sqlite'])) {
+                foreach (['', '-wal', '-shm'] as $suffix) {
+                    @unlink($this->app->databaseFile() . $suffix);
+                }
+                rename("$tmp/lou.sqlite", $this->app->databaseFile());
+            }
+            return ['safety' => $safety, 'files' => $files];
+        } finally {
+            Fs::removeDir($tmp);
+        }
+    }
+
+    /** @return list<string> what an uploaded site may not contain */
+    private static function check(string $siteDir): array
+    {
+        $problems = [];
+        foreach (Fs::files($siteDir) as $rel) {
+            if (preg_match('#(^|/)\.#', $rel)) {
+                $problems[] = "$rel: hidden files (starting with a dot) are not allowed";
+            } elseif (str_ends_with(strtolower($rel), '.php') && !str_starts_with($rel, 'templates/') && $rel !== 'config.php') {
+                $problems[] = "$rel: PHP files may only be in templates/ or be config.php";
+            } elseif (str_starts_with($rel, 'templates/') || $rel === 'config.php') {
+                array_push($problems, ...PathPolicy::checkContent($rel, (string) file_get_contents("$siteDir/$rel")));
+            }
+        }
+        return $problems;
     }
 
     /** @return array<string, mixed> the manifest */
