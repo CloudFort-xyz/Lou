@@ -145,10 +145,20 @@ final class Requirements
             $r[] = $this->item(self::FAIL, 'base_url', "still the example ($base): set the real https:// address in Admin → Settings (or site/config.php, then php lou build)");
         }
         if (!is_file($app->envFile())) {
-            $r[] = $this->item(self::WARN, '.env.php', 'missing: copy .env.example.php to .env.php for SMTP and API keys');
+            $r[] = $this->item(self::WARN, '.env.php', 'missing: copy .env.example.php to .env.php for API keys (SMTP can be set in Admin → Settings)');
         }
-        if (($app->config['mail']['transport'] ?? 'log') === 'log') {
-            $r[] = $this->item(self::WARN, 'mail', "transport is 'log', form emails only go to var/mail.log");
+        $transport = $app->config['mail']['transport'] ?? 'log';
+        if ($transport === 'log') {
+            $r[] = $this->item(self::WARN, 'mail', "transport is 'log', form emails only go to var/mail.log (change it in Admin → Settings)");
+        } elseif ($transport === 'smtp') {
+            try {
+                $host = \Lou\Env::load($app)->get('smtp.host');
+            } catch (\Throwable) {
+                $host = null;
+            }
+            if (!is_string($host) || $host === '') {
+                $r[] = $this->item(self::FAIL, 'mail', 'no SMTP server: set it in Admin → Settings (or smtp in .env.php), form emails cannot be sent');
+            }
         }
         if (!empty($app->config['git']['commit']) && !($this->hasFunction)('proc_open')) {
             $r[] = $this->item(self::FAIL, 'git commit', "'git' => ['commit' => true] needs proc_open, which is disabled");

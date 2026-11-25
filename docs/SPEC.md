@@ -512,7 +512,7 @@ without approval.
 - `.htaccess` sets a strict CSP, HSTS, `X-Content-Type-Options`,
   `Referrer-Policy` and `Permissions-Policy`, and gives assets long cache
   lifetimes with hashed file names.
-- Secrets live only in `.env.php` outside the web root.
+- Secrets live outside the web root: `.env.php`, plus `var/secrets.json` (0600) for the SMTP settings saved in the admin. Passwords are never echoed back.
 - Every write path (editor, bridge, forms) is authenticated or
   rate-limited, validated and logged.
 - Preview tokens are 128-bit random, expire, can be revoked, and are sent

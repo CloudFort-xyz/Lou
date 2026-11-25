@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Lou\Admin;
 
 use Lou\App;
+use Lou\Env;
+use Lou\Integrations;
+use Lou\Mail\Message;
 use Lou\Backup\Backup;
 use Lou\Bridge\Tokens;
 use Lou\Build\Builder;
@@ -78,9 +81,12 @@ final class AdminApp
         'POST token-revoke'   => 'admin',
         'GET settings'        => 'admin',
         'POST settings'       => 'admin',
+        'POST mail-settings'  => 'admin',
+        'POST mail-test'      => 'admin',
     ];
 
     private Request $req;
+    private ?Integrations $integrations = null;
 
     public function __construct(
         private readonly App $app,
@@ -542,14 +548,113 @@ final class AdminApp
 
     // ---------------------------------------------------------------- builds, backups, redirects
 
-    private function rGetSettings(): Response
+    private function rGetSettings(array $extra = []): Response
     {
-        return $this->page('Settings', 'settings', [
+        $env = Env::load($this->app);
+        $smtp = (array) $env->get('smtp', []);
+        $mail = (array) ($this->app->config['mail'] ?? []);
+        return $this->page('Settings', 'settings', $extra + [
             'current'    => (string) $this->app->config['base_url'],
             'configured' => $this->app->baseUrlConfigured(),
             'suggested'  => $this->req->origin(),
             'saved'      => isset($this->req->query['saved']),
+            'mailSaved'  => isset($this->req->query['mail-saved']),
+            'mail'       => [
+                'transport' => (string) ($mail['transport'] ?? 'smtp'),
+                'from'      => (string) ($mail['from'] ?? ''),
+                'from_name' => (string) ($mail['from_name'] ?? ''),
+            ],
+            // never the password itself: only whether one is stored
+            'smtp'       => [
+                'host'   => (string) ($smtp['host'] ?? ''),
+                'port'   => (int) ($smtp['port'] ?? 587),
+                'user'   => (string) ($smtp['user'] ?? ''),
+                'secure' => (string) ($smtp['secure'] ?? 'tls'),
+                'hasPass' => (string) ($smtp['pass'] ?? '') !== '',
+            ],
+            'smtpSource' => isset(Env::adminSecrets($this->app)['smtp']) ? 'admin' : (isset($smtp['host']) ? 'env' : null),
+            'testResult' => null,
         ]);
+    }
+
+    /** Mail sender (var/settings.json) and SMTP server (var/secrets.json, 0600). An empty password keeps the stored one. */
+    private function rPostMailSettings(): Response
+    {
+        $transport = $this->req->input('transport');
+        if (!in_array($transport, ['smtp', 'log'], true)) {
+            throw new LouException('Choose how emails are sent');
+        }
+        $from = trim($this->req->input('from'));
+        if (!filter_var($from, FILTER_VALIDATE_EMAIL)) {
+            throw new LouException('The sender address must be a valid email address');
+        }
+        $fromName = trim(preg_replace('/[\x00-\x1F\x7F]+/', ' ', $this->req->input('from_name')));
+        if (mb_strlen($fromName) > 100) {
+            throw new LouException('The sender name is too long (100 characters at most)');
+        }
+
+        $host = strtolower(trim($this->req->input('host')));
+        if ($host !== '' || $transport === 'smtp') {
+            if (!preg_match('/^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/', $host)) {
+                throw new LouException('The SMTP server must be a host name like mail.example.hu');
+            }
+            $port = (int) $this->req->input('port');
+            if ($port < 1 || $port > 65535) {
+                throw new LouException('The SMTP port must be a number between 1 and 65535');
+            }
+            $secure = $this->req->input('secure');
+            if (!in_array($secure, ['tls', 'ssl', ''], true)) {
+                throw new LouException('Unknown encryption setting');
+            }
+            $user = trim($this->req->input('user'));
+            if (mb_strlen($user) > 200 || preg_match('/[\x00-\x1F\x7F]/', $user)) {
+                throw new LouException('The SMTP user name is not valid');
+            }
+            $current = (array) Env::load($this->app)->get('smtp', []);
+            $pass = $this->req->input('pass');
+            if ($pass === '' && $this->req->input('clear_pass') !== '1') {
+                $pass = (string) ($current['pass'] ?? '');
+            }
+            if (strlen($pass) > 500) {
+                throw new LouException('The SMTP password is too long');
+            }
+            Env::storeAdminSecret($this->app, 'smtp', ['host' => $host, 'port' => $port, 'user' => $user, 'pass' => $pass, 'secure' => $secure]);
+        }
+
+        $settings = $this->app->settings();
+        $settings['mail'] = ['transport' => $transport, 'from' => $from, 'from_name' => $fromName];
+        Fs::writeJson($this->app->varDir . '/settings.json', $settings);
+        $this->db->audit('admin', 'settings', "mail $transport" . ($host !== '' ? " via $host" : ''), $this->user());
+        return Response::redirect(self::SELF . '?r=settings&mail-saved=1');
+    }
+
+    /** Send a test email with the saved settings and show what happened. */
+    private function rPostMailTest(): Response
+    {
+        $to = trim($this->req->input('to'));
+        if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+            throw new LouException('Enter the address the test email should go to');
+        }
+        $app = new App($this->app->root);
+        $result = ['ok' => true, 'message' => "Test email sent to $to. Check the inbox (and the spam folder)."];
+        try {
+            $integrations = $this->integrations ?? new Integrations($app, Env::load($app));
+            if (($app->config['mail']['transport'] ?? 'smtp') === 'log') {
+                $result['message'] = "Emails are set to 'write to a log file', so the test went to var/mail.log, not to $to.";
+            }
+            $integrations->mailer()->send(new Message([$to], '[' . $app->config['name'] . '] Lou test email',
+                "This is a test email from the Lou admin of {$app->config['name']}.\n\nIf you can read this, form emails will arrive too.\n\nSent by {$this->user()} at " . gmdate('Y-m-d H:i') . " UTC."));
+        } catch (LouException $e) {
+            $result = ['ok' => false, 'message' => $e->getMessage()];
+        }
+        $this->db->audit('admin', 'mail-test', ($result['ok'] ? 'ok ' : 'failed ') . $to, $this->user());
+        return $this->rGetSettings(['testResult' => $result, 'testTo' => $to]);
+    }
+
+    /** For tests: use these integrations (and their mailer) for the test email. */
+    public function useIntegrations(Integrations $integrations): void
+    {
+        $this->integrations = $integrations;
     }
 
     private function rPostSettings(): Response
