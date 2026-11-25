@@ -1,0 +1,5 @@
+/public/
+/var/
+/.env.php
+/site.old-*/
+.DS_Store

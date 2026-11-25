@@ -1,0 +1,9 @@
+{
+  "slug": "kapcsolat",
+  "title": "Kapcsolat",
+  "description": "Vegye fel velünk a kapcsolatot.",
+  "template": "contact",
+  "fields": {
+    "hero": { "title": "Kapcsolat", "text": "Írjon nekünk, egy munkanapon belül válaszolunk." }
+  }
+}

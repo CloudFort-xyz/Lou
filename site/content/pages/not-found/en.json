@@ -1,0 +1,5 @@
+{
+  "title": "Page not found",
+  "template": "page",
+  "fields": { "hero": { "title": "Page not found", "text": "The page may have moved." } }
+}

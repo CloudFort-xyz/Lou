@@ -1,0 +1,113 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Lou\App;
+use Lou\Backup\Backup;
+use Lou\Build\Builder;
+use Lou\LouException;
+use Lou\View;
+
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
+if (PHP_VERSION_ID < 80300) {
+    fwrite(STDERR, "Lou needs PHP 8.3 or newer (this is " . PHP_VERSION . ")\n");
+    exit(1);
+}
+
+require __DIR__ . '/src/autoload.php';
+
+/** @return array{0: list<string>, 1: array<string, string|true>} */
+function lou_args(array $argv): array
+{
+    $pos = [];
+    $opt = [];
+    foreach ($argv as $a) {
+        if (preg_match('/^--([a-z-]+)(?:=(.*))?$/', $a, $m)) {
+            $opt[$m[1]] = $m[2] ?? true;
+        } else {
+            $pos[] = $a;
+        }
+    }
+    return [$pos, $opt];
+}
+
+function lou_report_build(array $r): void
+{
+    echo "Built {$r['pages']} pages into {$r['output']} (build {$r['id']})\n";
+    foreach ($r['redirects']['moved'] as $m) {
+        echo "  redirect: {$m['from']} → {$m['to']}\n";
+    }
+    foreach ($r['warnings'] as $w) {
+        echo "  warning: $w\n";
+    }
+}
+
+[$pos, $opt] = lou_args(array_slice($argv, 1));
+$cmd = $pos[0] ?? 'help';
+$root = isset($opt['root']) && is_string($opt['root']) ? $opt['root'] : __DIR__;
+
+try {
+    $app = new App($root);
+
+    switch ($cmd) {
+        case 'build':
+            $mode = isset($opt['preview']) ? View::MODE_PREVIEW : View::MODE_LIVE;
+            lou_report_build((new Builder($app))->build($mode, is_string($opt['out'] ?? null) ? $opt['out'] : null));
+            break;
+
+        case 'serve':
+            $port = (int) ($opt['port'] ?? 8000);
+            $out = $app->varDir . '/serve';
+            $r = (new Builder($app))->build(View::MODE_PREVIEW, $out);
+            lou_report_build($r);
+            echo "Serving preview build on http://localhost:$port (Ctrl+C to stop; .htaccess rules are not applied)\n";
+            passthru(escapeshellarg(PHP_BINARY) . ' -S ' . escapeshellarg("localhost:$port") . ' -t ' . escapeshellarg($out));
+            break;
+
+        case 'backup':
+            $password = is_string($opt['password'] ?? null) ? $opt['password'] : null;
+            $keep = isset($opt['keep']) ? (int) $opt['keep'] : null;
+            $file = (new Backup($app))->create(is_string($opt['out'] ?? null) ? $opt['out'] : null, $password, $keep);
+            echo "Backup written: $file" . ($password ? ' (encrypted, includes .env.php)' : '') . "\n";
+            break;
+
+        case 'restore':
+            $file = $pos[1] ?? throw new LouException('Usage: php lou restore <backup.zip> [--password=…] [--no-db]');
+            $password = is_string($opt['password'] ?? null) ? $opt['password'] : null;
+            $safety = (new Backup($app))->restore($file, $password, !isset($opt['no-db']));
+            echo "Restored $file\nThe previous state was saved to $safety\n";
+            lou_report_build((new Builder(new App($root)))->build());
+            break;
+
+        case 'version':
+            echo 'Lou ' . App::VERSION . "\n";
+            break;
+
+        default:
+            $ver = App::VERSION;
+            echo <<<TXT
+            Lou {$ver}
+
+            Usage: php lou <command> [options]
+
+              build [--preview] [--out=DIR]   Build the site (live by default) and swap it in atomically
+              serve [--port=8000]             Build a preview and serve it with PHP's built-in server
+              backup [--out=FILE] [--keep=N] [--password=PW]
+                                              Single-file backup of site/ + database
+                                              (--password encrypts it and includes .env.php)
+              restore FILE [--password=PW] [--no-db]
+                                              Restore a backup (current state is backed up first), then rebuild
+              version                         Show the version
+
+            Global: --root=DIR to run against another install.
+
+            TXT;
+    }
+} catch (LouException $e) {
+    fwrite(STDERR, 'Error: ' . $e->getMessage() . "\n");
+    exit(1);
+}

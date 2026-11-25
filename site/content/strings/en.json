@@ -1,0 +1,11 @@
+{
+  "nav.label": "Main menu",
+  "nav.languages": "Languages",
+  "skip": "Skip to content",
+  "form.name": "Name",
+  "form.email": "Email",
+  "form.message": "Message",
+  "form.consent": "I accept the privacy policy",
+  "form.send": "Send",
+  "copyright": "© {year} {company}"
+}
