@@ -64,7 +64,8 @@ lou/                      ← repository / install root (NOT web-accessible)
 │   ├── lou.sqlite        ← submissions, subscribers, rate limits, audit log, changesets
 │   ├── staging/          ← staging copy of site/ for LLM changes
 │   ├── previews/         ← preview builds, one per token
-│   └── builds/           ← build history + URL manifests, for rollback and redirects
+│   ├── builds/           ← build history + URL manifests, for rollback and redirects
+│   └── backups/          ← single-file backups (scheduled + manual)
 ├── .env.php              ← secrets: SMTP, API keys, captcha keys (gitignored)
 └── public/               ← BUILD OUTPUT = web root (gitignored)
 ```
@@ -338,6 +339,11 @@ There's a **single-file backup and restore** of everything that makes up the sit
     safe while the site is live (submissions, subscribers, audit log)
   - `manifest.json`: Lou version, date, file list with SHA-256 checksums,
     languages
+- **Encoding:** file names are stored as UTF-8 with the zip UTF-8 flag set
+  (PHP's `ZipArchive`/libzip does this automatically, verified with
+  Hungarian accented names). File contents are binary-safe. Uploaded files
+  also get ASCII-normalised names (`árvíztűrő.jpg` → `arvizturo.jpg`),
+  so third-party unzip tools never matter.
 - **Secrets** (`.env.php`) are **excluded by default**. They can be
   included only with a password, in which case the zip is AES-256 encrypted
   via `ZipArchive`.
