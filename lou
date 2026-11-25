@@ -100,24 +100,55 @@ try {
             exit($ok ? 0 : 1);
 
         case 'deploy':
-            $target = $pos[1] ?? ((getenv('HOME') ?: throw new LouException('Usage: php lou deploy DIR')) . '/lou');
-            echo "Deploying Lou from " . __DIR__ . " to $target\n";
-            $php = (new Requirements($target))->php();
+            $home = getenv('HOME') ?: '';
+            if (isset($opt['pull'])) {
+                // For cron: do nothing unless the checked-out branch has new commits upstream.
+                $lock = fopen(__DIR__ . '/.git/lou-deploy.lock', 'c');
+                if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
+                    exit(0);   // another deploy is running
+                }
+                if (!(new Lou\Support\Git(__DIR__))->pullFastForward()) {
+                    exit(0);
+                }
+                echo gmdate('Y-m-d H:i:s') . " UTC: new commits pulled into " . __DIR__ . "\n";
+                // the code on disk just changed: deploy with the new version, not the one loaded here
+                $args = [PHP_BINARY, __DIR__ . '/lou', 'deploy', ...array_slice($pos, 1)];
+                if (isset($opt['no-build'])) {
+                    $args[] = '--no-build';
+                }
+                $proc = proc_open($args, [], $pipes);
+                exit(is_resource($proc) ? proc_close($proc) : 1);
+            }
+            if (!isset($pos[1]) && $home === '') {
+                throw new LouException('Usage: php lou deploy DIR');
+            }
+            $targets = isset($pos[1]) ? [$pos[1]] : Deployer::targets($home);
+            $php = (new Requirements($targets[0]))->php();
             if (!Requirements::passed($php)) {
                 lou_report_check(array_values(array_filter($php, fn ($i) => $i['level'] === Requirements::FAIL)));
                 throw new LouException('This PHP is missing required pieces, nothing was deployed');
             }
-            $r = (new Deployer(__DIR__))->deploy($target);
-            echo '  updated: ' . implode(', ', $r['code']) . "\n";
-            echo $r['seeded'] ? "  site/ did not exist, seeded it from the repository\n" : "  site/ kept (the server's copy is the live content)\n";
-            lou_report_check(array_values(array_filter((new Requirements($target))->run(), fn ($i) => $i['level'] !== Requirements::OK)));
-            if (isset($opt['no-build'])) {
-                break;
+            $failed = [];
+            foreach ($targets as $target) {
+                echo "Deploying Lou from " . __DIR__ . " to $target\n";
+                try {
+                    $r = (new Deployer(__DIR__))->deploy($target);
+                    echo '  updated: ' . implode(', ', $r['code']) . "\n";
+                    echo $r['seeded'] ? "  site/ did not exist, seeded it from the repository\n" : "  site/ kept (the server's copy is the live content)\n";
+                    lou_report_check(array_values(array_filter((new Requirements($target))->run(), fn ($i) => $i['level'] !== Requirements::OK)));
+                    if (!isset($opt['no-build'])) {
+                        $proc = proc_open([PHP_BINARY, "$target/lou", 'build'], [], $pipes);
+                        if ((is_resource($proc) ? proc_close($proc) : 1) !== 0) {
+                            throw new LouException('the code was deployed but the build failed (see above), the previous build is still live');
+                        }
+                    }
+                } catch (LouException $e) {
+                    fwrite(STDERR, "  Error: {$e->getMessage()}\n");
+                    $failed[] = $target;
+                }
             }
-            $proc = proc_open([PHP_BINARY, "$target/lou", 'build'], [], $pipes);
-            $code = is_resource($proc) ? proc_close($proc) : 1;
-            if ($code !== 0) {
-                throw new LouException('The code was deployed but the build failed (see above). The previous build is still live.');
+            if ($failed) {
+                throw new LouException('Deploy failed for: ' . implode(', ', $failed));
             }
             break;
 
@@ -236,8 +267,11 @@ try {
                                               Manage admin users (add prompts for the password)
               token list|add NAME|revoke ID   Manage LLM bridge tokens (/_lou/mcp.php)
               check                           Check PHP version, extensions, folders and config for this install
-              deploy [DIR] [--no-build]       Copy the code from this checkout into an install (default ~/lou),
-                                              seed site/ on the first deploy only, then build. For .cpanel.yml
+              deploy [DIR] [--no-build] [--pull]
+                                              Copy the code from this checkout into an install, seed site/ on the
+                                              first deploy only, then build. Without DIR: every folder listed in
+                                              ~/.lou-target, or ~/lou. --pull (for cron): git pull first and do
+                                              nothing when there is nothing new
               version                         Show the version
 
             Global: --root=DIR to run against another install.

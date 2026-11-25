@@ -104,3 +104,40 @@ test('deploy: refuses relative targets and the checkout itself', function () {
         contains($e->getMessage(), 'not a Lou checkout');
     }
 });
+
+test('deploy targets: every line of ~/.lou-target, ~ expanded, comments skipped; ~/lou without the file', function () {
+    $home = temp_dir();
+    check(Deployer::targets($home) === ["$home/lou"], 'default is ~/lou');
+    file_put_contents("$home/.lou-target", "/srv/a\n\n# old client\n~/domains/b.hu\n  /srv/c  \n");
+    check(Deployer::targets($home) === ['/srv/a', "$home/domains/b.hu", '/srv/c'], implode(',', Deployer::targets($home)));
+    file_put_contents("$home/.lou-target", "\n# nothing\n");
+    check(Deployer::targets($home) === ["$home/lou"], 'empty file falls back to ~/lou');
+});
+
+test('deploy --pull: fast-forwards only when upstream has new commits', function () {
+    $dir = temp_dir();
+    $git = function (string $cwd, string ...$args): string {
+        $cmd = 'git -C ' . escapeshellarg($cwd) . ' -c user.name=t -c user.email=t@t -c init.defaultBranch=main '
+            . implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
+        exec($cmd, $out, $code);
+        check($code === 0, "$cmd: " . implode("\n", $out));
+        return implode("\n", $out);
+    };
+    mkdir("$dir/origin");
+    $git("$dir/origin", 'init', '-q', '--bare');
+    $git($dir, 'clone', '-q', "$dir/origin", 'dev');
+    file_put_contents("$dir/dev/a.txt", '1');
+    $git("$dir/dev", 'add', '.');
+    $git("$dir/dev", 'commit', '-qm', 'one');
+    $git("$dir/dev", 'push', '-q', 'origin', 'HEAD:main');
+    $git($dir, 'clone', '-q', '-b', 'main', "$dir/origin", 'server');
+
+    $server = new Lou\Support\Git("$dir/server");
+    check($server->pullFastForward() === false, 'nothing new');
+    file_put_contents("$dir/dev/a.txt", '2');
+    $git("$dir/dev", 'commit', '-qam', 'two');
+    $git("$dir/dev", 'push', '-q', 'origin', 'HEAD:main');
+    check($server->pullFastForward() === true, 'new commit pulled');
+    check(file_get_contents("$dir/server/a.txt") === '2', 'working tree updated');
+    check($server->pullFastForward() === false, 'nothing new again');
+});

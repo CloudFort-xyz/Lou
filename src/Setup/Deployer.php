@@ -23,6 +23,26 @@ final class Deployer
     {
     }
 
+    /**
+     * Install folders to deploy to: one absolute path per line in ~/.lou-target (blank lines and # comments
+     * ignored, ~/ expanded), or ~/lou when the file is missing or empty.
+     * @return list<string>
+     */
+    public static function targets(string $home): array
+    {
+        $home = rtrim($home, '/');
+        $lines = is_file("$home/.lou-target") ? (file("$home/.lou-target", FILE_IGNORE_NEW_LINES) ?: []) : [];
+        $out = [];
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+            $out[] = str_starts_with($line, '~/') ? $home . substr($line, 1) : $line;
+        }
+        return $out ?: ["$home/lou"];
+    }
+
     /** @return array{target: string, code: list<string>, seeded: bool} */
     public function deploy(string $target): array
     {
