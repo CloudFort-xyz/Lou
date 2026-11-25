@@ -237,12 +237,20 @@ try {
             $sub = $pos[1] ?? 'list';
             if ($sub === 'list') {
                 foreach ($users->all() as $name => $u) {
-                    echo str_pad($name, 24) . str_pad($u['role'], 8) . $u['created'] . "\n";
+                    echo str_pad($name, 24) . str_pad($u['role'], 8) . str_pad((string) ($u['prefs']['lang'] ?? '-'), 4) . $u['created'] . "\n";
                 }
             } elseif ($sub === 'add') {
-                $name = $pos[2] ?? throw new LouException('Usage: php lou user add NAME [--role=admin|editor] [--password=…]');
+                $name = $pos[2] ?? throw new LouException('Usage: php lou user add NAME [--role=admin|editor] [--lang=en|hu] [--password=…]');
+                $lang = is_string($opt['lang'] ?? null) ? $opt['lang'] : null;
+                if ($lang !== null && !isset(Lou\Admin\I18n::LANGUAGES[$lang])) {
+                    throw new LouException('--lang must be one of: ' . implode(', ', array_keys(Lou\Admin\I18n::LANGUAGES)));
+                }
                 $password = is_string($opt['password'] ?? null) ? $opt['password'] : lou_prompt_password();
                 $users->add($name, $password, is_string($opt['role'] ?? null) ? $opt['role'] : 'editor');
+                if ($lang !== null) {
+                    $p = $users->prefs($name);
+                    $users->setPrefs($name, new Lou\Admin\Prefs($lang, $p->timezone, $p->dateFormat, $p->editLang, $p->startPage));
+                }
                 echo "User $name saved\n";
             } elseif ($sub === 'remove') {
                 $users->remove($pos[2] ?? throw new LouException('Usage: php lou user remove NAME'));
@@ -346,8 +354,9 @@ try {
                                               Restore a backup (current state is backed up first), then rebuild
               retry                           Re-run failed actions (email, newsletter, webhook) of stored submissions
               submissions [--form=ID]         Export submissions as CSV to stdout
-              user list|add NAME [--role=admin]|remove NAME
-                                              Manage admin users (add prompts for the password)
+              user list|add NAME [--role=admin] [--lang=hu]|remove NAME
+                                              Manage admin users (add prompts for the password;
+                                              --lang sets their admin language, see Profile)
               token list|add NAME|revoke ID   Manage LLM bridge tokens (/_lou/mcp.php)
               check                           Check PHP version, extensions, folders and config for this install
               deploy [DIR] [--site=DIR] [--no-build] [--pull]

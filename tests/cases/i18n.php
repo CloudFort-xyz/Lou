@@ -188,3 +188,15 @@ test('admin: admins set the site-wide admin language; every user can change thei
     $r = $editor->handle(admin_req('POST', 'password', ['current_password' => 'uj jelszo 12345', 'new_password' => 'a1234567890', 'new_password2' => 'b1234567890'], $html));
     contains($r->body, 'The two new passwords are not the same.');
 });
+
+test('cli: user add --lang sets the admin language, and user list shows it', function () {
+    $root = install();
+    $lou = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__, 2) . '/lou');
+    exec("$lou user add anna --lang=hu --password='hosszu jelszo 1' --root=" . escapeshellarg($root) . ' 2>&1', $out, $code);
+    check($code === 0, implode("\n", $out));
+    check((new Users("$root/var/users.json"))->prefs('anna')->lang === 'hu', 'lang stored');
+    exec("$lou user list --root=" . escapeshellarg($root) . ' 2>&1', $list);
+    check((bool) preg_match('/^anna\s+editor\s+hu\s/m', implode("\n", $list)), implode("\n", $list));
+    exec("$lou user add bob --lang=xx --password='hosszu jelszo 1' --root=" . escapeshellarg($root) . ' 2>&1', $out2, $code2);
+    check($code2 !== 0 && !isset((new Users("$root/var/users.json"))->all()['bob']), 'unknown languages are refused before the user is created');
+});
