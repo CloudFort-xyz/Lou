@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Lou\Admin\AdminApp;
 use Lou\Admin\ArraySession;
+use Lou\Admin\NativeSession;
 use Lou\Admin\Previews;
 use Lou\Admin\Users;
 use Lou\App;
@@ -85,6 +86,11 @@ test('admin: requires login, CSRF, same origin and the right role', function () 
     [$editor] = admin_setup('editor');
     check($editor->handle(admin_req('GET', 'builds'))->status === 403, 'editors cannot see builds');
     check($editor->handle(admin_req('GET', 'submissions'))->status === 200, 'editors can see submissions');
+});
+
+test('admin: the session cookie survives links opened from other sites (SameSite=Lax, not Strict)', function () {
+    check(NativeSession::SAMESITE === 'Lax', 'a Strict cookie is dropped on cross-site links, so PHP starts a new session and signs the person out');
+    contains((string) file_get_contents(dirname(__DIR__, 2) . '/src/Admin/NativeSession.php'), "'samesite' => self::SAMESITE");
 });
 
 test('admin: sessions expire after inactivity', function () {

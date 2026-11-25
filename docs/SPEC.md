@@ -233,6 +233,12 @@ Deploy options:
   `release.json` and its Ed25519 signature (public key in
   `src/Setup/release-key.pub`), swap in the code with the Deployer, and ask
   for one rebuild (`var/live.json` records the Lou version of each build).
+  Unsigned or wrongly signed uploads are refused unless `.env.php` sets
+  `'allow_unsigned_updates' => true` (FTP/SSH only, so a stolen admin login
+  can't), and even then only after a security warning and typing the
+  version. Tags with a suffix (`v0.2.0-rc.1`) publish signed GitHub
+  pre-releases that "Check for updates" ignores, and the Release workflow's
+  manual run builds a signed test zip from any branch as an artifact.
   See `docs/install.md`.
 - **Client site design from a zip (fallback, no Git).** Admin → Updates
   takes a zip of a client repository. Its templates and assets are planned
@@ -382,7 +388,8 @@ expiry).
   history, see submissions) and **admin** (also assistants/tokens,
   redirects, builds/rollback, backups, deleting submissions). Sessions are hardened: their own save path in
   `var/sessions`, strict mode, a `__Host-` cookie with Secure, HttpOnly and
-  SameSite=Strict, a 2 h idle and 12 h absolute timeout, CSRF tokens on every
+  SameSite=Lax (Strict would sign people out when they open an admin link
+  from another site), a 2 h idle and 12 h absolute timeout, CSRF tokens on every
   POST, a same-origin check, and login rate limiting. TOTP can come later.
 - **Previews are static builds at secret URLs** (`/_lou/p/<128-bit token>/`)
   inside the web root, so they need no PHP to view and work on any host.

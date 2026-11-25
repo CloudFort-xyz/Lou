@@ -103,6 +103,7 @@ final class AdminApp
         'POST update-check'   => 'admin',
         'POST update'         => 'admin',
         'POST update-upload'  => 'admin',
+        'POST update-unsigned' => 'admin',
         'POST rebuild'        => 'admin',
         'POST design-upload'  => 'admin',
     ];
@@ -624,8 +625,33 @@ final class AdminApp
             $diffs = $s->diffs();
             $vars += ['meta' => $s->meta(), 'diffs' => $diffs, 'items' => ChangeList::of($s, $diffs, $this->i18n()->plain(...)), 'problems' => $s->validate(),
                 'conflicts' => $s->conflicts(), 'preview' => $s->lastPreview()];
+            $vars['views'] = $this->previewLinks($s, $vars['items'], $vars['preview']);
         }
         return $this->page($this->tr('Review'), 'review', $vars);
+    }
+
+    /**
+     * Each changed page's address inside the staging preview, so Review can open it directly.
+     * Only while the preview is current (it shows exactly what is staged); deleted pages have none.
+     * @return array<string, string> file path => preview URL of that page
+     */
+    private function previewLinks(Workspace $s, array $items, ?array $preview): array
+    {
+        if (!$preview || (int) $preview['rev'] !== (int) $s->meta()['rev']) {
+            return [];
+        }
+        try {
+            $site = Site::load($s->app());
+        } catch (LouException) {
+            return [];
+        }
+        $out = [];
+        foreach ($items as $it) {
+            if ($it['page'] && $it['kind'] !== 'deleted' && $site->page($it['page']['id'], $it['page']['lang'])) {
+                $out[$it['path']] = rtrim((string) $preview['url'], '/') . $site->path($it['page']['id'], $it['page']['lang']);
+            }
+        }
+        return $out;
     }
 
     private function rPostReviewPreview(): Response
@@ -893,6 +919,7 @@ final class AdminApp
             'updated'    => $updated,
             'needsBuild' => Updater::needsRebuild($this->app),
             'maxUpload'  => (string) ini_get('upload_max_filesize'),
+            'unsignedAllowed' => $u->signaturesChecked() && $u->unsignedAllowed(),
             'checkError' => null,
         ]);
     }
@@ -927,8 +954,72 @@ final class AdminApp
         if (!is_array($file) || ($file['error'] ?? 1) !== UPLOAD_ERR_OK || !$this->isUploaded((string) $file['tmp_name'])) {
             throw new LouException($this->tr('Upload a Lou release .zip (lou-<version>.zip)'));
         }
-        $r = $this->updater()->apply((string) $file['tmp_name'], $this->req->input('allow_older') === '1');
+        $u = $this->updater();
+        $info = $u->inspect((string) $file['tmp_name']);
+        if (in_array($info['signature'], ['missing', 'invalid'], true)) {
+            return $this->unsignedUpload($u, $file, $info);
+        }
+        $r = $u->apply((string) $file['tmp_name'], $this->req->input('allow_older') === '1');
         $this->db->audit('admin', 'update', "{$r['from']} → {$r['to']} (uploaded" . ($r['signed'] ? ')' : ', unsigned)'), $this->user());
+        return Response::redirect(self::SELF . '?r=updates');
+    }
+
+    /**
+     * A release zip without a valid signature. Refused unless .env.php sets allow_unsigned_updates (FTP/SSH
+     * access, so a stolen admin login alone can't install code). Otherwise it's parked for an hour and a
+     * security warning asks the admin to type the version to confirm.
+     */
+    private function unsignedUpload(Updater $u, array $file, array $info): Response
+    {
+        $why = $info['signature'] === 'invalid'
+            ? $this->tr('This zip’s signature does not match Lou’s release key (it may have been changed), so it was not installed.')
+            : $this->tr('This zip is not signed with Lou’s release key, so it was not installed.');
+        if (!$u->unsignedAllowed()) {
+            throw new LouException($why . ' ' . $this->tr('If you trust it (for example a test build you made), someone with FTP or SSH access can add {setting} to .env.php. You will then be asked to confirm with a security warning.', ['setting' => "'allow_unsigned_updates' => true"]));
+        }
+        $dir = $this->app->varDir . '/updates';
+        foreach (glob("$dir/unsigned-*.zip") ?: [] as $old) {
+            if (filemtime($old) < time() - 3600) {
+                @unlink($old);
+            }
+        }
+        $token = bin2hex(random_bytes(16));
+        Fs::ensureDir($dir);
+        if (!copy((string) $file['tmp_name'], "$dir/unsigned-$token.zip")) {
+            throw new LouException($this->tr('Cannot store the uploaded zip'));
+        }
+        $this->session->set('unsignedUpload', $token);
+        return $this->page($this->tr('Unsigned release'), 'update-unsigned', [
+            'version'    => $info['version'],
+            'signature'  => $info['signature'],
+            'current'    => App::VERSION,
+            'name'       => (string) ($file['name'] ?? 'release.zip'),
+            'sha256'     => (string) hash_file('sha256', "$dir/unsigned-$token.zip"),
+            'token'      => $token,
+            'allowOlder' => $this->req->input('allow_older') === '1',
+        ]);
+    }
+
+    private function rPostUpdateUnsigned(): Response
+    {
+        $token = $this->req->input('token');
+        $zip = $this->app->varDir . "/updates/unsigned-$token.zip";
+        if (!preg_match('/^[a-f0-9]{32}$/', $token) || !hash_equals((string) $this->session->get('unsignedUpload', ''), $token)
+            || !is_file($zip) || filemtime($zip) < time() - 3600) {
+            throw new LouException($this->tr('This upload has expired. Upload the zip again.'));
+        }
+        $u = $this->updater();
+        $info = $u->inspect($zip);
+        if (trim($this->req->input('confirm')) !== $info['version']) {
+            throw new LouException($this->tr('To install it, type the version exactly: {version}', ['version' => $info['version']]));
+        }
+        try {
+            $r = $u->apply($zip, $this->req->input('allow_older') === '1', true);
+        } finally {
+            @unlink($zip);
+            $this->session->set('unsignedUpload', null);
+        }
+        $this->db->audit('admin', 'update', "{$r['from']} → {$r['to']} (uploaded, UNSIGNED {$info['signature']}, confirmed)", $this->user());
         return Response::redirect(self::SELF . '?r=updates');
     }
 

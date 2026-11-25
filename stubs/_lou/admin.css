@@ -243,3 +243,4 @@ ins{background:var(--ok-bg);color:#05603a;text-decoration:none;box-shadow:inset 
   .change-actions{margin-left:0;width:100%}
 }
 .undo-row .btn:disabled{opacity:.45;cursor:default}
+.preview-pages{flex-basis:100%;margin:0;font-size:13px}

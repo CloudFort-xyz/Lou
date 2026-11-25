@@ -1,9 +1,22 @@
 name: Release
 # Push a tag like v0.2.0 to publish lou-0.2.0.zip on the GitHub releases page.
 # The zip is what people install and update from without Git (see docs/install.md).
+#
+# Pre-releases:
+# - A tag with a suffix (v0.2.0-rc.1, v0.2.0-beta.2) is published as a GitHub *pre-release*.
+#   "Check for updates" ignores pre-releases (it asks GitHub for the latest full release),
+#   so only people who download the zip and upload it under Admin → Updates get it.
+# - "Run workflow" on the Actions tab builds a signed test zip from any branch without
+#   publishing anything. It is attached to the run as an artifact (kept 14 days).
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version for the test zip (empty: <current version>.<run number>, e.g. 0.2.0-dev.12)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -20,12 +33,39 @@ jobs:
           coverage: none
       - name: Tests
         run: php tests/run.php
+      - name: Work out the version
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            v="${GITHUB_REF_NAME#v}"
+          elif [ -n "$INPUT_VERSION" ]; then
+            v="$INPUT_VERSION"
+          else
+            base=$(sed -n "s/.*public const VERSION = '\([^']*\)'.*/\1/p" src/App.php)
+            case "$base" in *-*) v="$base.$GITHUB_RUN_NUMBER" ;; *) v="$base-dev.$GITHUB_RUN_NUMBER" ;; esac
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Build the release zip
         env:
           # Created once with `php lou release-key`. Required as soon as src/Setup/release-key.pub is committed.
           LOU_SIGNING_KEY: ${{ secrets.LOU_SIGNING_KEY }}
-        run: php lou release --version="${GITHUB_REF_NAME#v}" --out=dist
+          VERSION: ${{ steps.v.outputs.version }}
+        run: php lou release --version="$VERSION" --out=dist
+      - name: Attach the test zip to this run
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lou-${{ steps.v.outputs.version }}
+          path: dist/*
+          retention-days: 14
       - name: Publish
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Lou ${GITHUB_REF_NAME#v}" --generate-notes
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          pre=""
+          case "$VERSION" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --title "Lou $VERSION" --generate-notes $pre

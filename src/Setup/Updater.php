@@ -59,6 +59,21 @@ final class Updater
         return null;
     }
 
+    /**
+     * Whether this install may install release zips without a valid signature (after a confirmation).
+     * Only .env.php can turn it on: it needs FTP/SSH access, so a stolen admin login can't.
+     */
+    public function unsignedAllowed(): bool
+    {
+        return \Lou\Env::load($this->app)->get('allow_unsigned_updates') === true;
+    }
+
+    /** @return array{version: string, signature: string} see Release::inspect() */
+    public function inspect(string $zipFile): array
+    {
+        return Release::inspect($zipFile, $this->publicKey);
+    }
+
     public function signaturesChecked(): bool
     {
         return ($this->publicKey === null ? Release::trustedKey() : ($this->publicKey ?: null)) !== null;
@@ -130,15 +145,19 @@ final class Updater
     /**
      * Verifies a release zip and swaps its code into this install.
      * @param bool $force also allow an older version
+     * @param bool $unsigned skip the signature check (only when unsignedAllowed() and the person confirmed)
      * @return array{from: string, to: string, signed: bool}
      */
-    public function apply(string $zipFile, bool $force = false): array
+    public function apply(string $zipFile, bool $force = false, bool $unsigned = false): array
     {
+        if ($unsigned && !$this->unsignedAllowed()) {
+            throw new LouException("Unsigned releases are not allowed on this install (set 'allow_unsigned_updates' => true in .env.php)");
+        }
         if (($why = $this->blocked()) !== null) {
             throw new LouException($why);
         }
         $dir = $this->app->varDir . '/updates/.unpacked-' . bin2hex(random_bytes(4));
-        $release = Release::extract($zipFile, $dir, $this->publicKey);
+        $release = Release::extract($zipFile, $dir, $unsigned ? false : $this->publicKey);
         try {
             if (version_compare(PHP_VERSION, (string) $release['php'], '<')) {
                 throw new LouException("Lou {$release['version']} needs PHP {$release['php']} or newer, this is " . PHP_VERSION);
