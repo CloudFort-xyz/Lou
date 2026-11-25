@@ -50,6 +50,12 @@ final class Updater
         if (is_dir($this->app->root . '/.git')) {
             return 'This install is a Git checkout. Update it with git (or php lou deploy from your clone) instead.';
         }
+        $from = $this->app->varDir . '/deployed-from.json';
+        $source = is_file($from) ? (string) (Fs::readJson($from)['source'] ?? '') : '';
+        if ($source !== '' && is_file("$source/lou")) {
+            return "This install is deployed from the Git clone in $source (php lou deploy). Update that clone instead: "
+                . "a zip update here would be overwritten by the next deploy. Delete var/deployed-from.json to switch to zip updates.";
+        }
         return null;
     }
 

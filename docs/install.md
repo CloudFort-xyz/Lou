@@ -78,7 +78,7 @@ An update only replaces Lou's code (`src/`, `stubs/`, `vendor-bundled/`, `starte
 
 **Verification.** Each release zip lists the SHA-256 of every file in `release.json`, and the release workflow signs that list with an Ed25519 key. An install that ships the public key (`src/Setup/release-key.pub`) refuses zips that are unsigned, signed with another key, or have a changed, missing or extra file. Signature checks need the PHP `sodium` extension, which is in PHP by default.
 
-An install that is a Git checkout updates with Git (or `php lou deploy`), and the Updates screen says so.
+An install that is a Git checkout, or that `php lou deploy` copies code into from a clone (it leaves `var/deployed-from.json`), updates from Git, and the Updates screen says so.
 
 ## For maintainers: publishing a release
 
