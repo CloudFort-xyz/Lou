@@ -6,12 +6,13 @@ namespace Lou\Admin;
 
 use Lou\App;
 use Lou\Backup\Backup;
-use Lou\Bridge\Staging;
 use Lou\Bridge\Tokens;
 use Lou\Build\Builder;
 use Lou\Content\ContentStore;
+use Lou\Content\History;
 use Lou\Content\Page;
 use Lou\Content\Site;
+use Lou\Content\Workspace;
 use Lou\Db\Database;
 use Lou\Http\Request;
 use Lou\Http\Response;
@@ -57,10 +58,14 @@ final class AdminApp
         'GET redirects'       => 'admin',
         'POST redirect'       => 'admin',
         'POST revoke'         => 'admin',
-        'GET changes'         => 'admin',
-        'POST changes-preview' => 'admin',
-        'POST approve'        => 'admin',
-        'POST reject'         => 'admin',
+        'POST submit'         => 'editor',
+        'POST revert'         => 'editor',
+        'GET review'          => 'editor',
+        'POST review-preview' => 'editor',
+        'POST reject'         => 'editor',
+        'GET history'         => 'editor',
+        'GET history-entry'   => 'editor',
+        'POST history-restore' => 'editor',
         'GET assistants'      => 'admin',
         'POST token-add'      => 'admin',
         'POST token-revoke'   => 'admin',
@@ -191,7 +196,8 @@ final class AdminApp
 
     private function rGetPages(): Response
     {
-        $site = Site::load($this->app);
+        $this->draft()->rebase();
+        $site = Site::load($this->draft()->app());
         $rows = [];
         $ids = [];
         foreach ($site->allPages() as $p) {
@@ -206,11 +212,12 @@ final class AdminApp
 
     private function rGetEdit(): Response
     {
-        $site = Site::load($this->app);
+        $this->draft()->rebase();
+        $site = Site::load($this->draft()->app());
         $lang = (string) ($this->req->query['lang'] ?? $site->defaultLanguage());
         $id = (string) ($this->req->query['page'] ?? Page::HOME);
         $page = $site->page($id, $lang) ?? throw new LouException("Page '$id' does not exist in '$lang'");
-        $token = (new Previews($this->app))->editor();
+        $token = (new Previews($this->app))->editor($this->owner(), true);
         return $this->page('Edit: ' . $page->title, 'edit', [
             'site'    => $site,
             'page'    => $page,
@@ -221,7 +228,7 @@ final class AdminApp
     /** JSON: page meta for the settings panel (when the editor navigates inside the preview). */
     private function rGetMeta(): Response
     {
-        $site = Site::load($this->app);
+        $site = Site::load($this->draft()->app());
         $page = $site->page((string) ($this->req->query['page'] ?? ''), (string) ($this->req->query['lang'] ?? ''))
             ?? throw new LouException('Unknown page');
         return Response::json(200, ['ok' => true, 'page' => $page->id, 'lang' => $page->lang, 'title' => $page->title,
@@ -233,7 +240,7 @@ final class AdminApp
     {
         [$id, $lang] = $this->pageParams();
         $field = $this->req->input('field');
-        (new ContentStore($this->app))->setField($id, $lang, $field, $this->req->input('type') ?: 'text', $this->req->input('value'));
+        $this->inDraft(fn (ContentStore $c) => $c->setField($id, $lang, $field, $this->req->input('type') ?: 'text', $this->req->input('value')));
         $this->db->audit('editor', 'save', "$id/$lang $field", $this->user());
         return $this->afterChange();
     }
@@ -249,13 +256,15 @@ final class AdminApp
                 throw new LouException('Upload failed (the file may be too large for the server)');
             }
             $image += (new ImageProcessor((int) ($this->app->config['admin']['image_max_width'] ?? 1920)))
-                ->process((string) $file['tmp_name'], (string) $file['name'], $this->app->siteDir);
+                ->process((string) $file['tmp_name'], (string) $file['name'], $this->draftDir());
         }
-        $current = (new ContentStore($this->app))->read($id, $lang);
-        if (!isset($image['src']) && !is_array(\Lou\Support\Arr::get($current['fields'] ?? [], $field))) {
-            throw new LouException('Choose an image to upload');
-        }
-        (new ContentStore($this->app))->setImage($id, $lang, $field, $image + (isset($image['src']) ? [] : ['src' => (string) \Lou\Support\Arr::get($current['fields'], "$field.src")]));
+        $this->inDraft(function (ContentStore $c) use ($id, $lang, $field, $image): void {
+            $current = $c->read($id, $lang);
+            if (!isset($image['src']) && !is_array(\Lou\Support\Arr::get($current['fields'] ?? [], $field))) {
+                throw new LouException('Choose an image to upload');
+            }
+            $c->setImage($id, $lang, $field, $image + (isset($image['src']) ? [] : ['src' => (string) \Lou\Support\Arr::get($current['fields'], "$field.src")]));
+        });
         $this->db->audit('editor', 'image', "$id/$lang $field", $this->user());
         return $this->afterChange();
     }
@@ -269,29 +278,164 @@ final class AdminApp
                 $meta[$k] = $this->req->input($k);
             }
         }
-        (new ContentStore($this->app))->setMeta($id, $lang, $meta, $this->role() === 'admin');
+        $this->inDraft(fn (ContentStore $c) => $c->setMeta($id, $lang, $meta, $this->role() === 'admin'));
         $this->db->audit('editor', 'meta', "$id/$lang " . implode(',', array_keys($meta)), $this->user());
-        $site = Site::load($this->app);
+        $site = Site::load($this->draft()->app());
         return $this->afterChange(['path' => $site->path($id, $lang)]);
     }
 
     private function afterChange(array $extra = []): Response
     {
-        (new Previews($this->app))->rebuildAll();
-        return Response::json(200, ['ok' => true, 'unpublished' => $this->unpublished()] + $extra);
+        (new Previews($this->app))->rebuild('draft:' . $this->owner());
+        return Response::json(200, ['ok' => true, 'draft' => $this->draft()->hasChanges()] + $extra);
     }
 
+    // ---------------------------------------------------------------- drafts, staging, publishing
+
+    private function owner(): string
+    {
+        return 'user:' . $this->user();
+    }
+
+    private function draft(): Workspace
+    {
+        return Workspace::draft($this->app, $this->owner());
+    }
+
+    /** The draft's site dir, opening the draft first. */
+    private function draftDir(): string
+    {
+        $d = $this->draft();
+        $d->open();
+        return $d->siteDir();
+    }
+
+    /** Run a ContentStore write against the user's draft. */
+    private function inDraft(callable $fn): void
+    {
+        $d = $this->draft();
+        $d->open();
+        try {
+            $fn(new ContentStore($d->app()));
+            $d->touch();
+        } finally {
+            if (!$d->hasChanges()) {
+                $d->discard();
+            }
+        }
+    }
+
+    /** Draft → staging. */
+    private function rPostSubmit(): Response
+    {
+        $d = $this->draft();
+        $d->rebase();
+        if (!$d->hasChanges()) {
+            throw new LouException('Your draft has no changes to submit.');
+        }
+        $conflicts = $d->conflicts();
+        if ($conflicts && $this->req->input('force') !== '1') {
+            return $this->page('Conflict', 'conflict', ['conflicts' => $conflicts, 'summary' => $this->req->input('summary')], 409);
+        }
+        $files = $d->apply($this->req->input('force') === '1');
+        Workspace::staging($this->app)->addSubmission($this->owner(), $this->req->input('summary'), $files);
+        $previews = new Previews($this->app);
+        $previews->rebuild();
+        $this->db->audit('editor', 'submit', implode(', ', $files), $this->user());
+        return Response::redirect(self::SELF . '?r=review');
+    }
+
+    /** Throw away (some of) my draft: the given files, or all of it. */
+    private function rPostRevert(): Response
+    {
+        $files = array_filter((array) ($this->req->post['files'] ?? []), 'is_string');
+        $files ? $this->draft()->revert($files) : $this->draft()->discard();
+        (new Previews($this->app))->rebuild('draft:' . $this->owner());
+        $this->db->audit('editor', 'revert', $files ? implode(', ', $files) : 'all', $this->user());
+        return Response::redirect(self::SELF . '?r=review');
+    }
+
+    private function rGetReview(): Response
+    {
+        $s = Workspace::staging($this->app);
+        $mine = $this->draft();
+        $mine->rebase();
+        $drafts = [];
+        foreach (Workspace::allDrafts($this->app) as $d) {
+            if ($d->owner !== $this->owner() && $d->hasChanges()) {
+                $drafts[] = ['owner' => $d->owner, 'files' => count($d->changedFiles()), 'updated' => $d->meta()['updated']];
+            }
+        }
+        $vars = ['open' => $s->exists(), 'mine' => $mine->hasChanges() ? ['files' => $mine->changedFiles(), 'conflicts' => $mine->conflicts()] : null,
+            'drafts' => $drafts];
+        if ($s->exists()) {
+            $vars += ['meta' => $s->meta(), 'files' => $s->changes(), 'diffs' => $s->diffs(), 'problems' => $s->validate(),
+                'conflicts' => $s->conflicts(), 'preview' => $s->lastPreview()];
+        }
+        return $this->page('Review', 'review', $vars);
+    }
+
+    private function rPostReviewPreview(): Response
+    {
+        $s = Workspace::staging($this->app);
+        $problems = $s->validate();
+        if ($problems) {
+            throw new LouException('Staging has problems:', $problems);
+        }
+        $p = (new Previews($this->app))->stable('staging', 'staging', $this->user());
+        $s->recordPreview(rtrim((string) $this->app->config['base_url'], '/') . Previews::urlPrefix($p['token']) . '/', $p['result']);
+        return Response::redirect(self::SELF . '?r=review');
+    }
+
+    /** Staging → site/ → live build. Without staging, just builds site/ (e.g. after redirect changes). */
     private function rPostPublish(): Response
     {
+        $s = Workspace::staging($this->app);
+        $applied = null;
+        $safety = null;
+        $meta = null;
+        if ($s->exists()) {
+            $meta = $s->meta();
+            if ($this->req->input('rev') !== (string) $meta['rev']) {
+                throw new LouException('Staging changed while you were reviewing it. Review it again.');
+            }
+            $safety = basename((new Backup($this->app))->create(null, null, 30));
+            $history = new History($this->app);
+            $entry = $history->record($s->changes(), $s->siteDir(), (string) $this->user(), $meta['submissions']);
+            try {
+                $applied = $s->apply($this->req->input('force') === '1');
+            } catch (LouException $e) {
+                if ($entry) {
+                    Fs::removeDir($this->app->varDir . "/history/$entry");
+                }
+                throw $e;
+            }
+        }
         $result = (new Builder($this->app))->build();
-        $this->db->audit('editor', 'publish', $result['id'], $this->user());
-        return $this->page('Published', 'published', ['result' => $result]);
+        $previews = new Previews($this->app);
+        $previews->revokeSource('staging');
+        $previews->rebuild();
+        $this->db->audit('editor', 'publish', $result['id'] . ($applied ? ': ' . implode(', ', $applied) : ''), $this->user());
+
+        $git = null;
+        if ($applied && !empty($this->app->config['git']['commit']) && Git::available($this->app->root)) {
+            $lines = array_map(fn ($sub) => '- ' . ($sub['summary'] !== '' ? $sub['summary'] : count($sub['files']) . ' files') . ' (' . preg_replace('/^(user|llm):/', '', $sub['by']) . ')', $meta['submissions']);
+            $subject = count($meta['submissions']) === 1 && $meta['submissions'][0]['summary'] !== ''
+                ? strtok($meta['submissions'][0]['summary'], "\n") : 'Publish ' . count($applied) . ' changed files';
+            try {
+                $hash = (new Git($this->app->root))->commit($subject . "\n\n" . implode("\n", $lines) . "\n\nPublished by {$this->user()} in Lou.", (string) $this->user());
+                $git = $hash ? "Committed to Git as $hash." : null;
+            } catch (LouException $e) {
+                $result['warnings'][] = 'The Git commit failed: ' . $e->getMessage();
+            }
+        }
+        return $this->page('Published', 'published', ['result' => $result, 'applied' => $applied, 'git' => $git, 'safety' => $safety]);
     }
 
     private function rPostShare(): Response
     {
         $days = max(1, min(30, (int) ($this->req->input('days') ?: 7)));
-        $token = (new Previews($this->app))->create('share', $days * 86400, $this->user());
+        $token = (new Previews($this->app))->create('share', 'draft:' . $this->owner(), $days * 86400, $this->user());
         $this->db->audit('editor', 'share-preview', $token, $this->user());
         $base = rtrim((string) $this->app->config['base_url'], '/');
         return Response::json(200, ['ok' => true, 'url' => $base . Previews::urlPrefix($token) . '/', 'days' => $days]);
@@ -470,74 +614,45 @@ final class AdminApp
         return Response::redirect(self::SELF . '?r=redirects');
     }
 
-    // ---------------------------------------------------------------- LLM changesets + assistants
-
-    private function rGetChanges(): Response
-    {
-        $s = new Staging($this->app);
-        if (!$s->exists()) {
-            return $this->page('Changes', 'changes', ['open' => false]);
-        }
-        return $this->page('Changes', 'changes', [
-            'open'      => true,
-            'meta'      => $s->meta(),
-            'files'     => $s->changes(),
-            'diffs'     => $s->diffs(),
-            'problems'  => $s->validate(),
-            'conflicts' => $s->conflicts(),
-            'preview'   => $s->lastPreview(),
-        ]);
-    }
-
-    private function rPostChangesPreview(): Response
-    {
-        $s = new Staging($this->app);
-        $problems = $s->validate();
-        if ($problems) {
-            throw new LouException('The staged site has problems:', $problems);
-        }
-        $p = (new Previews($this->app))->changeset($this->user());
-        $s->recordPreview(rtrim((string) $this->app->config['base_url'], '/') . Previews::urlPrefix($p['token']) . '/', $p['result']);
-        return Response::redirect(self::SELF . '?r=changes');
-    }
-
-    private function rPostApprove(): Response
-    {
-        $s = new Staging($this->app);
-        $meta = $s->meta();
-        if ($this->req->input('id') !== $meta['id']) {
-            throw new LouException('The changeset changed while you were reviewing it. Review it again.');
-        }
-        $safety = (new Backup($this->app))->create(null, null, 30);
-        $applied = $s->apply($this->req->input('force') === '1');
-        (new Previews($this->app))->revokeKind('changeset');
-        $result = (new Builder($this->app))->build();
-        (new Previews($this->app))->rebuildAll();
-        $files = array_merge($applied['added'], $applied['modified'], $applied['deleted']);
-        $this->db->audit('admin', 'approve-changeset', $meta['id'] . ': ' . implode(', ', $files), $this->user());
-
-        $git = null;
-        if (!empty($this->app->config['git']['commit']) && Git::available($this->app->root)) {
-            try {
-                $hash = (new Git($this->app->root))->commit(
-                    ($meta['summary'] !== '' ? $meta['summary'] : 'Changes by ' . $meta['by']) . "\n\nChangeset {$meta['id']} by {$meta['by']}, approved by {$this->user()} in Lou.",
-                    (string) $this->user());
-                $git = $hash ? "Committed to Git as $hash." : null;
-            } catch (LouException $e) {
-                $result['warnings'][] = 'The Git commit failed: ' . $e->getMessage();
-            }
-        }
-        return $this->page('Approved', 'published', ['result' => $result, 'applied' => $applied, 'git' => $git, 'safety' => basename($safety)]);
-    }
+    // ---------------------------------------------------------------- assistants
 
     private function rPostReject(): Response
     {
-        $s = new Staging($this->app);
-        $id = $s->exists() ? $s->meta()['id'] : null;
+        $s = Workspace::staging($this->app);
+        $files = $s->changedFiles();
         $s->discard();
-        (new Previews($this->app))->revokeKind('changeset');
-        $this->db->audit('admin', 'reject-changeset', $id, $this->user());
-        return $this->page('Rejected', 'message', ['message' => 'The changes were discarded. The live site was not touched.']);
+        $previews = new Previews($this->app);
+        $previews->revokeSource('staging');
+        $previews->rebuild();
+        $this->db->audit('editor', 'reject-staging', implode(', ', $files), $this->user());
+        return $this->page('Rejected', 'message', ['message' => 'Everything on staging was discarded. The live site was not touched.']);
+    }
+
+    // ---------------------------------------------------------------- history
+
+    private function rGetHistory(): Response
+    {
+        $h = new History($this->app);
+        $path = (string) ($this->req->query['file'] ?? '');
+        return $this->page('History', 'history', ['entries' => $h->all($path !== '' ? $path : null), 'file' => $path, 'enabled' => $h->enabled()]);
+    }
+
+    private function rGetHistoryEntry(): Response
+    {
+        $h = new History($this->app);
+        $id = (string) ($this->req->query['id'] ?? '');
+        return $this->page('History', 'history-entry', ['entry' => $h->get($id), 'diffs' => $h->diffs($id)]);
+    }
+
+    /** Put old (or new) versions from a history entry into my draft; they go live through the usual submit + publish. */
+    private function rPostHistoryRestore(): Response
+    {
+        $files = array_values(array_filter((array) ($this->req->post['files'] ?? []), 'is_string'));
+        $side = $this->req->input('side') === 'after' ? 'after' : 'before';
+        $done = (new History($this->app))->restoreInto($this->draft(), $this->req->input('id'), $side, $files ?: null);
+        (new Previews($this->app))->rebuild('draft:' . $this->owner());
+        $this->db->audit('editor', 'history-restore', $this->req->input('id') . " $side: " . implode(', ', $done), $this->user());
+        return Response::redirect(self::SELF . '?r=review');
     }
 
     private function rGetAssistants(): Response
@@ -606,8 +721,8 @@ final class AdminApp
             'siteName'    => $this->app->config['name'],
             'baseUrl'     => (string) $this->app->config['base_url'],
             'unpublished' => $this->session->get('user') ? $this->unpublished() : false,
-            'changeset'   => $this->session->get('user') && $this->role() === 'admin' && (new Staging($this->app))->exists()
-                ? (new Staging($this->app))->meta()['status'] : null,
+            'staged'      => $this->session->get('user') ? count(Workspace::staging($this->app)->changedFiles()) : 0,
+            'drafted'     => $this->session->get('user') ? count($this->draft()->changedFiles()) : 0,
         ];
         $render = static function (string $__file, array $__vars) use ($e): string {
             extract($__vars, EXTR_SKIP);

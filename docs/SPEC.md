@@ -318,9 +318,9 @@ expiry).
 
 - At `/_lou/admin.php`: log in with a user name and password. Users are
   managed with `php lou user add|remove|list` and stored as password hashes
-  in `var/users.json`. Roles: **editor** (edit content, publish, see
-  submissions) and **admin** (also redirects, builds/rollback, backups,
-  deleting submissions). Sessions are hardened: their own save path in
+  in `var/users.json`. Roles: **editor** (edit content, submit, publish,
+  history, see submissions) and **admin** (also assistants/tokens,
+  redirects, builds/rollback, backups, deleting submissions). Sessions are hardened: their own save path in
   `var/sessions`, strict mode, a `__Host-` cookie with Secure, HttpOnly and
   SameSite=Strict, a 2 h idle and 12 h absolute timeout, CSRF tokens on every
   POST, a same-origin check, and login rate limiting. TOTP can come later.
@@ -332,7 +332,52 @@ expiry).
 - **Inline editing:** the admin loads the editing preview (with
   `data-lou-field` markers) in an iframe. Clicking a marked element edits
   it in place: text is contenteditable, and images open an upload/replace
-  dialog. Saving writes the JSON field and rebuilds the affected page.
+  dialog. Saving writes the JSON field into the person's **draft** (see
+  8.1) and rebuilds their preview.
+
+### 8.1 Drafts, staging, publishing and history
+
+```
+your draft ──submit──▶ staging (shared) ──publish──▶ site/ ──build──▶ public/
+```
+
+- **Drafts.** Every admin user and every assistant token has its own draft
+  in `var/drafts/<owner>/`: a copy of what they see (staging if open,
+  otherwise `site/`) plus a `base` snapshot. Edits only touch the draft, so
+  nobody sees anyone else's unsubmitted work. Untouched files follow
+  upstream automatically (rebase), so a draft always shows the latest
+  staged and published state plus the person's own changes. A draft with no
+  changes left is deleted.
+- **Submit** copies only the files the draft changed into staging
+  (`var/staging/`, opened from `site/` on first use) and records who
+  submitted what, with an optional summary. If someone else submitted a
+  change to the same file meanwhile, that's a **conflict**: the person can
+  take their version (revert those files in the draft) or submit theirs
+  anyway. Assistants get an error telling them to re-read and redo.
+- **Staging** is the shared, reviewable next version of the site, with a
+  stable preview link, diffs, the submitters' summaries, validation
+  problems and the redirect report. **Anyone who can edit can publish or
+  reject it** (decided 2026-11-25). Reject discards staging; drafts stay.
+- **Publish** checks the staging revision (no blind publishing of
+  something that changed during review), validates, takes a safety backup,
+  records history, copies the changed files into `site/`, builds live,
+  and optionally commits `site/` to Git (`'git' => ['commit' => true]`; run
+  without a shell, never pushes). Files changed in `site/` since staging
+  opened (a restore, a rollback edit) are conflicts that need "overwrite".
+  `redirects.json` is always merged by `from`, because live builds add
+  automatic redirects.
+- **History** (like WordPress revisions, but for every file, templates
+  included): each publish stores the old and new version of every file it
+  changed in `var/history/<id>/{before,after}/` with who submitted and
+  published it. The History page lists publishes, per-file history and
+  diffs. "Undo this publish", "Undo just this file" and "Restore this
+  version" put those versions into the person's draft, so they go live
+  through the normal submit and publish. Configurable:
+  `'history' => ['keep' => 200, 'days' => 0]` (last N publishes / max age,
+  0 = no limit), or `'history' => false`.
+- Later: one editor plus a live viewer (a viewer link that reloads as the
+  editor saves) for showing the client changes in real time; collaborative
+  editing after that.
 - The editor has a language switcher. Edits apply to the language being
   viewed, and a "missing translations" list shows pages without a file for
   some language.
@@ -384,16 +429,18 @@ without approval.
 
 1. The assistant connects to the site's bridge endpoint (`/_lou/mcp.php`).
 2. It reads the site: pages, templates, menu, styles.
-3. It proposes changes. These are written to **`var/staging/`** (a copy of
-   `site/`), never to `site/` directly.
+3. It proposes changes. These are written to **its own draft** (a copy of
+   `site/`, see 8.1), never to `site/` directly.
 4. Lou builds staging into a **preview** at a secret, expiring URL
    (`/_lou/p/<random token>/`, a static build, see section 8). The link is **shareable**,
    so the client can see it without logging in. It expires after 7 days by
    default and can be revoked from the admin.
-5. A human reviews the diff, the preview and the **redirect report** (see
-   6.1) in the admin, then clicks **Approve**.
-6. Approve copies staging over `site/`, logs the change, optionally commits
-   to Git, and builds live. **Reject** discards staging.
+5. It submits the draft to **staging**. A human reviews the diff, the
+   preview and the **redirect report** (see 6.1) in the admin, then clicks
+   **Publish**.
+6. Publish copies the staged files into `site/`, keeps history, logs the
+   change, optionally commits to Git, and builds live. **Reject** discards
+   staging.
 
 ### Protocols
 
@@ -421,22 +468,12 @@ without approval.
   returns `{"ok": true, "result": …}`. `GET /_lou/mcp.php?openapi` describes
   it (OpenAPI 3.1, generated from the same tool definitions).
 
-### Staging and approval
+### Drafts for assistants
 
-- The first write copies `site/` to `var/staging/site` (the working copy) and
-  `var/staging/base` (a snapshot). `var/staging/changeset.json` holds the id,
-  status (`open` / `review`), author and summary.
-- On approval only the files the assistant changed (compared with `base`) are
-  copied into `site/`, so content edits made in the admin in the meantime are
-  kept. A file changed on both sides is a **conflict**: approval is blocked
-  unless the admin ticks "overwrite". `redirects.json` is merged by `from`
-  instead, because live builds add automatic redirects meanwhile.
-- **Approve** validates again, takes a safety backup, applies, publishes
-  (which also publishes any pending admin edits), revokes the changeset
-  preview, logs, and optionally commits `site/` to Git (`'git' => ['commit'
-  => true]`, run without a shell, never pushes). **Reject** discards staging.
-- The approve form carries the changeset id, so a changeset that changed
-  while the admin was looking at it cannot be approved blindly.
+- Each token works in its own draft, exactly like an admin user (8.1).
+  `build_preview` builds that draft at a stable secret link,
+  `submit_for_review` moves its changes to staging with a summary, and
+  `discard_changes` deletes the draft. Publishing happens in the admin.
 
 ### Guardrails
 

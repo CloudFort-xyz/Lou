@@ -6,17 +6,23 @@ namespace Lou\Admin;
 
 use Lou\App;
 use Lou\Build\Builder;
+use Lou\Content\Workspace;
+use Lou\LouException;
 use Lou\Support\Fs;
 use Lou\View;
 
 /**
- * Preview builds of the current (unpublished) site/ as static files at secret URLs: /_lou/p/<token>/.
- * They need no PHP to view, never get indexed, and survive publishing. Kinds:
- *   - "editor": the admin's inline-editing preview (with the editor script injected), rotated daily
- *   - "share":  a read-only link to show the client, expires after N days, revocable
+ * Preview builds as static files at secret URLs: /_lou/p/<token>/. They need no PHP to view, never get
+ * indexed, and survive publishing. Each shows a source: a person's draft, staging, or site/. Kinds:
+ *   - "editor":  a person's inline-editing preview of their draft (editor script injected), rotated daily
+ *   - "share":   a read-only link to show the client, expires after N days, revocable
+ *   - "draft":   an assistant's preview of its draft (stable link)
+ *   - "staging": the review preview of everything on staging (stable link)
  */
 final class Previews
 {
+    private ?array $lastResult = null;
+
     public function __construct(private readonly App $app)
     {
     }
@@ -38,65 +44,75 @@ final class Previews
         return is_file($f) ? Fs::readJson($f) : [];
     }
 
-    /** The editor preview token (rebuilt with $rebuild). */
-    public function editor(bool $rebuild = false): string
+    /** A person's inline-editing preview of their own draft (rebuilt with $rebuild). $owner: "user:bence". */
+    public function editor(string $owner, bool $rebuild = false): string
     {
         $this->cleanup();
         foreach ($this->all() as $token => $p) {
-            if ($p['kind'] === 'editor') {
+            if ($p['kind'] === 'editor' && ($p['source'] ?? '') === "draft:$owner") {
                 if ($rebuild || !is_dir($this->baseDir() . '/' . $token)) {
-                    $this->build($token, true);
+                    $this->build($token, $p);
                 }
                 return $token;
             }
         }
-        return $this->create('editor', 86400);
+        return $this->create('editor', "draft:$owner", 86400, $owner);
     }
 
-    public function create(string $kind, int $ttl, ?string $by = null): string
+    /**
+     * $source: "site", "staging" or "draft:<owner>" (that person's draft, or what they see if they have none).
+     */
+    public function create(string $kind, string $source, int $ttl, ?string $by = null): string
     {
         $token = bin2hex(random_bytes(16));
-        $this->build($token, $kind === 'editor', $kind === 'changeset');
+        $entry = ['kind' => $kind, 'source' => $source, 'created' => gmdate('c'), 'expires' => time() + $ttl, 'by' => $by];
+        $this->build($token, $entry);
         $all = $this->all();
-        $all[$token] = ['kind' => $kind, 'created' => gmdate('c'), 'expires' => time() + $ttl, 'by' => $by];
+        $all[$token] = $entry;
         Fs::writeJson($this->registry(), $all);
         return $token;
     }
 
-    /** Rebuild every live preview (after content changes). */
-    public function rebuildAll(): void
-    {
-        foreach ($this->all() as $token => $p) {
-            if ($p['kind'] !== 'changeset') {
-                $this->build($token, $p['kind'] === 'editor');
-            }
-        }
-    }
-
     /**
-     * (Re)build the preview of the LLM's staged changes. Keeps one stable link per changeset.
+     * (Re)build the one stable preview of a kind + source (e.g. the staging review preview, an assistant's draft).
      * @return array{token: string, result: array}
      */
-    public function changeset(?string $by = null): array
+    public function stable(string $kind, string $source, ?string $by = null, int $ttl = 7 * 86400): array
     {
         $this->cleanup();
         foreach ($this->all() as $token => $p) {
-            if ($p['kind'] === 'changeset') {
-                return ['token' => $token, 'result' => $this->build($token, false, true)];
+            if ($p['kind'] === $kind && ($p['source'] ?? '') === $source) {
+                return ['token' => $token, 'result' => $this->build($token, $p)];
             }
         }
-        $token = bin2hex(random_bytes(16));
-        $result = $this->build($token, false, true);
-        $all = $this->all();
-        $all[$token] = ['kind' => 'changeset', 'created' => gmdate('c'), 'expires' => time() + 7 * 86400, 'by' => $by];
-        Fs::writeJson($this->registry(), $all);
-        return ['token' => $token, 'result' => $result];
+        $token = $this->create($kind, $source, $ttl, $by);
+        return ['token' => $token, 'result' => $this->lastResult];
     }
 
-    public function revokeKind(string $kind): void
+    /** Rebuild the previews that show $source; null = all of them (after staging or site/ changed). */
+    public function rebuild(?string $source = null): void
     {
         foreach ($this->all() as $token => $p) {
-            if ($p['kind'] === $kind) {
+            if ($source !== null && ($p['source'] ?? 'site') !== $source) {
+                continue;
+            }
+            try {
+                $this->build($token, $p);
+            } catch (LouException) {
+                // a broken draft must not break everyone else's previews; its owner sees the error when saving
+            }
+        }
+    }
+
+    public function rebuildAll(): void
+    {
+        $this->rebuild();
+    }
+
+    public function revokeSource(string $source): void
+    {
+        foreach ($this->all() as $token => $p) {
+            if (($p['source'] ?? '') === $source) {
                 $this->revoke($token);
             }
         }
@@ -127,17 +143,29 @@ final class Previews
         }
     }
 
-    private function build(string $token, bool $editor, bool $staging = false): array
+    private function sourceApp(string $source): App
     {
-        $source = $staging ? (new \Lou\Bridge\Staging($this->app))->app() : $this->app;
+        if ($source === 'staging') {
+            return Workspace::staging($this->app)->app();
+        }
+        if (str_starts_with($source, 'draft:')) {
+            return Workspace::draft($this->app, substr($source, 6))->app();
+        }
+        return $this->app;
+    }
+
+    private function build(string $token, array $entry): array
+    {
+        $editor = $entry['kind'] === 'editor';
         $inject = $editor
             ? '<link rel="stylesheet" href="/_lou/editor.css"><script src="/_lou/editor.js" defer data-page="{page}" data-lang="{lang}"></script>'
             : '';
+        $source = $this->sourceApp((string) ($entry['source'] ?? 'site'));
         $result = (new Builder($source))->build($editor ? View::MODE_EDIT : View::MODE_PREVIEW, $this->baseDir() . '/' . $token, self::urlPrefix($token), $inject);
         if (!is_file($this->baseDir() . '/.htaccess')) {
             Fs::write($this->baseDir() . '/.htaccess', "Options -Indexes\n<IfModule mod_headers.c>\n    Header always set X-Robots-Tag \"noindex, nofollow\"\n</IfModule>\n");
         }
-        return $result;
+        return $this->lastResult = $result;
     }
 
     private function registry(): string

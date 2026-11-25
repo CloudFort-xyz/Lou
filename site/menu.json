@@ -1,1 +1,8 @@
-["home", "about", {"page": "services"}, "contact"]
+[
+    "home",
+    "about",
+    {
+        "page": "services"
+    },
+    "contact"
+]

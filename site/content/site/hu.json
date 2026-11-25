@@ -1,7 +1,7 @@
 {
-  "company": "Példa Kft.",
-  "address": "1051 Budapest, Példa utca 1.",
-  "email": "info@example.com",
-  "phone": "+36 1 234 5678",
-  "footer": "Minden jog fenntartva."
+    "company": "Példa Kft.",
+    "address": "1051 Budapest, Példa utca 1.",
+    "email": "info@example.com",
+    "phone": "+36 1 234 5678",
+    "footer": "Minden jog fenntartva."
 }

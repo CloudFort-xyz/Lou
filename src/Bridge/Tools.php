@@ -8,6 +8,7 @@ use Lou\Admin\ImageProcessor;
 use Lou\Admin\Previews;
 use Lou\App;
 use Lou\Content\Site;
+use Lou\Content\Workspace;
 use Lou\Db\Database;
 use Lou\LouException;
 use Lou\Support\Fs;
@@ -30,16 +31,16 @@ final class Tools
     {
         $path = ['type' => 'string', 'description' => 'Path relative to site/, e.g. templates/page.php or content/pages/about/en.json'];
         return [
-            self::def('describe_site', 'Start here. Explains how this Lou site is built (content model, templates, helpers, rules), lists languages, pages, templates and forms, and shows the state of the current changeset.', []),
-            self::def('list_files', 'List files of the site (the staged copy if a changeset is open).', ['prefix' => ['type' => 'string', 'description' => 'Optional folder, e.g. templates or content/pages/about']]),
-            self::def('read_file', 'Read a text file of the site (the staged copy if a changeset is open).', ['path' => $path], ['path']),
-            self::def('write_file', 'Create or replace a text file in the staged copy. Opens a changeset if needed. PHP is checked against the template rules; JSON must be valid.', ['path' => $path, 'content' => ['type' => 'string', 'description' => 'Full new file content (UTF-8)']], ['path', 'content']),
-            self::def('delete_file', 'Delete a file from the staged copy (e.g. a page language file or an unused template).', ['path' => $path], ['path']),
-            self::def('upload_image', 'Add an image to the staged copy (it is re-encoded to WebP and resized). Returns the src to use in content JSON.', ['filename' => ['type' => 'string'], 'data_base64' => ['type' => 'string', 'description' => 'JPEG, PNG, GIF or WebP, base64-encoded']], ['filename', 'data_base64']),
-            self::def('build_preview', 'Build the staged site into a private preview. Returns the preview URL, build warnings, and the URLs that will redirect after approval. Fix any errors it reports.', []),
-            self::def('get_changes', 'Show the changeset: changed files with diffs, validation problems and conflicts.', []),
-            self::def('submit_for_review', 'Mark the changeset ready for a human to review and approve in the admin. Include a short summary for the reviewer.', ['summary' => ['type' => 'string']], ['summary']),
-            self::def('discard_changes', 'Throw away the whole staged changeset.', []),
+            self::def('describe_site', 'Start here. Explains how this Lou site is built (content model, templates, helpers, rules), lists languages, pages, templates and forms, and shows your draft and what is on staging.', []),
+            self::def('list_files', 'List files of the site as you see it (your draft, which includes everything on staging).', ['prefix' => ['type' => 'string', 'description' => 'Optional folder, e.g. templates or content/pages/about']]),
+            self::def('read_file', 'Read a text file of the site as you see it (your draft).', ['path' => $path], ['path']),
+            self::def('write_file', 'Create or replace a text file in your draft. PHP is checked against the template rules; JSON must be valid.', ['path' => $path, 'content' => ['type' => 'string', 'description' => 'Full new file content (UTF-8)']], ['path', 'content']),
+            self::def('delete_file', 'Delete a file from your draft (e.g. a page language file or an unused template).', ['path' => $path], ['path']),
+            self::def('upload_image', 'Add an image to your draft (it is re-encoded to WebP and resized). Returns the src to use in content JSON.', ['filename' => ['type' => 'string'], 'data_base64' => ['type' => 'string', 'description' => 'JPEG, PNG, GIF or WebP, base64-encoded']], ['filename', 'data_base64']),
+            self::def('build_preview', 'Build your draft into a private preview. Returns the preview URL, build warnings, and the URLs that will redirect once published. Fix any errors it reports.', []),
+            self::def('get_changes', 'Show the changes in your draft: changed files with diffs, validation problems and conflicts with staging.', []),
+            self::def('submit_for_review', 'Move the changes in your draft to staging, where a person reviews and publishes them. Include a short summary for the reviewer.', ['summary' => ['type' => 'string']], ['summary']),
+            self::def('discard_changes', 'Throw away your whole draft.', []),
         ];
     }
 
@@ -51,7 +52,8 @@ final class Tools
     /** @return string|array result for the assistant */
     public function call(string $name, array $args): string|array
     {
-        $staging = new Staging($this->app);
+        $staging = Workspace::draft($this->app, $this->caller);
+        $staging->rebase(); // see what others submitted or published meanwhile
         $str = static fn (string $k): string => is_string($args[$k] ?? null) ? $args[$k] : throw new LouException("Missing argument '$k'");
 
         $result = match ($name) {
@@ -73,90 +75,100 @@ final class Tools
         return $result;
     }
 
-    private function write(Staging $s, string $path, string $content): string
+    private function write(Workspace $s, string $path, string $content): string
     {
-        $s->write($path, $content, $this->caller);
-        return "Saved $path to staging. Call build_preview to check the result.";
+        $s->write($path, $content);
+        return "Saved $path to your draft. Call build_preview to check the result.";
     }
 
-    private function delete(Staging $s, string $path): string
+    private function delete(Workspace $s, string $path): string
     {
-        $s->delete($path, $this->caller);
-        return "Deleted $path from staging.";
+        $s->delete($path);
+        return "Deleted $path from your draft.";
     }
 
-    private function upload(Staging $s, string $filename, string $b64): array
+    private function upload(Workspace $s, string $filename, string $b64): array
     {
         $bytes = base64_decode($b64, true);
         if ($bytes === false) {
             throw new LouException('data_base64 is not valid base64');
         }
-        $s->open($this->caller);
+        $s->open();
         $tmp = $this->app->varDir . '/.upload-' . bin2hex(random_bytes(4));
         Fs::write($tmp, $bytes);
         try {
             $img = (new ImageProcessor((int) ($this->app->config['admin']['image_max_width'] ?? 1920)))->process($tmp, $filename, $s->siteDir());
+            $s->touch();
         } finally {
             @unlink($tmp);
         }
         return $img + ['note' => 'Use {"src": "' . $img['src'] . '", "alt": "…", "width": ' . $img['width'] . ', "height": ' . $img['height'] . '} in an image field.'];
     }
 
-    private function preview(Staging $s): array
+    private function preview(Workspace $s): array
     {
-        $s->open($this->caller);
         $problems = $s->validate();
         if ($problems) {
             return ['ok' => false, 'problems' => $problems];
         }
-        $p = (new Previews($this->app))->changeset($this->caller);
+        $p = (new Previews($this->app))->stable('draft', 'draft:' . $this->caller, $this->caller);
         $url = rtrim((string) $this->app->config['base_url'], '/') . Previews::urlPrefix($p['token']) . '/';
-        $s->recordPreview($url, $p['result']);
+        if ($s->exists()) {
+            $s->recordPreview($url, $p['result']);
+        }
         return [
             'ok'        => true,
             'url'       => $url,
             'pages'     => $p['result']['pages'],
             'warnings'  => $p['result']['warnings'],
             'redirects' => $p['result']['redirects'],
-            'note'      => 'Share this link with the user. Nothing is live until they approve the changeset in the admin.',
+            'note'      => 'Share this link with the user. Nothing is live until your draft is submitted to staging and published.',
         ];
     }
 
-    private function changes(Staging $s): array
+    private function changes(Workspace $s): array
     {
-        if (!$s->exists()) {
-            return ['open' => false, 'note' => 'No changeset is open. write_file opens one.'];
+        if (!$s->hasChanges()) {
+            return ['changes' => false, 'note' => 'Your draft has no changes. write_file starts one.'];
         }
-        return ['open' => true, 'changeset' => $s->meta(), 'files' => $s->changes(), 'diffs' => $s->diffs(),
+        return ['changes' => true, 'files' => $s->changes(), 'diffs' => $s->diffs(),
             'problems' => $s->validate(), 'conflicts' => $s->conflicts()];
     }
 
-    private function submit(Staging $s, string $summary): array
+    private function submit(Workspace $s, string $summary): array
     {
-        $c = $s->changes();
-        if (!array_merge($c['added'], $c['modified'], $c['deleted'])) {
+        if (!$s->hasChanges()) {
             throw new LouException('There are no changes to submit');
         }
-        $problems = $s->validate();
-        if ($problems) {
-            throw new LouException('Fix these first:', $problems);
+        if (trim($summary) === '') {
+            throw new LouException('Write a short summary for the reviewer');
         }
-        $s->submit($summary);
+        $conflicts = $s->conflicts();
+        if ($conflicts) {
+            throw new LouException('Someone else changed these files on staging since you started. Read them again (read_file), '
+                . 'redo your change on top of their version with write_file, then submit again:', $conflicts);
+        }
+        $files = $s->apply();
+        $staging = Workspace::staging($this->app);
+        $staging->addSubmission($this->caller, $summary, $files);
+        $previews = new Previews($this->app);
+        $previews->revokeSource('draft:' . $this->caller);
+        $previews->rebuild();
         $base = rtrim((string) $this->app->config['base_url'], '/');
-        return ['ok' => true, 'review_url' => $base . '/_lou/admin.php?r=changes',
-            'note' => 'Ask the user to open the review page, check the preview and approve.'];
+        return ['ok' => true, 'submitted' => $files, 'review_url' => $base . '/_lou/admin.php?r=review',
+            'note' => 'Your changes are on staging. Ask the user to open the review page, check the preview and publish.'];
     }
 
-    private function discard(Staging $s): string
+    private function discard(Workspace $s): string
     {
         $s->discard();
-        (new Previews($this->app))->revokeKind('changeset');
-        return 'The changeset was discarded.';
+        (new Previews($this->app))->revokeSource('draft:' . $this->caller);
+        return 'Your draft was discarded.';
     }
 
-    private function describe(Staging $s): array
+    private function describe(Workspace $s): array
     {
-        $app = $s->exists() ? $s->app() : $this->app;
+        $app = $s->app();
         try {
             $site = Site::load($app);
             $pages = [];
@@ -177,7 +189,8 @@ final class Tools
             'templates'     => $templates,
             'forms'         => array_map(fn ($f) => array_keys((array) ($f['fields'] ?? [])), (array) ($app->config['forms'] ?? [])),
             'site_error'    => $siteError,
-            'changeset'     => $s->exists() ? $s->meta() + ['files' => $s->changes()] : null,
+            'draft'         => $s->hasChanges() ? ['files' => $s->changes(), 'conflicts' => $s->conflicts()] : null,
+            'staging'       => Workspace::staging($this->app)->exists() ? Workspace::staging($this->app)->meta()['submissions'] : null,
             'guide'         => self::GUIDE,
         ];
     }
@@ -185,9 +198,10 @@ final class Tools
     private const GUIDE = <<<'MD'
         # How this Lou site works
 
-        Everything you change is staged. The user reviews a preview and approves it before anything goes live.
+        Everything you change goes to your own draft (a private copy of the site). Others' drafts are separate.
         Workflow: describe_site → read_file → write_file (repeat) → build_preview (fix problems) → share the preview URL
-        with the user → submit_for_review with a short summary.
+        with the user → submit_for_review with a short summary. That puts your changes on staging, where a person
+        reviews everything and publishes it. Nothing goes live before that.
 
         ## Files (paths relative to site/)
         - content/pages/<page-id>/<lang>.json : one file per page and language. Keys: slug, title, menu_label, description,

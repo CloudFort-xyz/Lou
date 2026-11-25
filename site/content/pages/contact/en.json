@@ -1,9 +1,12 @@
 {
-  "slug": "contact",
-  "title": "Contact",
-  "description": "Get in touch.",
-  "template": "contact",
-  "fields": {
-    "hero": { "title": "Contact", "text": "Write to us, we reply within one business day." }
-  }
+    "slug": "contact",
+    "title": "Contact",
+    "description": "Get in touch.",
+    "template": "contact",
+    "fields": {
+        "hero": {
+            "title": "Contact",
+            "text": "Write to us, we reply within one business day."
+        }
+    }
 }
