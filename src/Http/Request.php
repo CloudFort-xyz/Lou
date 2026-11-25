@@ -20,6 +20,7 @@ final class Request
         public readonly string $ip = '',
         public readonly int $contentLength = 0,
         public readonly array $files = [],
+        public readonly string $body = '',
     ) {
     }
 
@@ -31,6 +32,9 @@ final class Request
                 $headers[strtolower(str_replace('_', '-', substr($k, 5)))] = (string) $v;
             }
         }
+        if (!isset($headers['authorization']) && isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+            $headers['authorization'] = (string) $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+        }
         return new self(
             method: strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')),
             query: $_GET,
@@ -39,6 +43,8 @@ final class Request
             ip: (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
             contentLength: (int) ($_SERVER['CONTENT_LENGTH'] ?? 0),
             files: $_FILES,
+            // raw body only for JSON requests (MCP / REST); form posts arrive in $_POST
+            body: str_contains((string) ($_SERVER['CONTENT_TYPE'] ?? ''), 'json') ? (string) file_get_contents('php://input', false, null, 0, 8 * 1024 * 1024) : '',
         );
     }
 

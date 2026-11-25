@@ -3,7 +3,7 @@
 A static-first CMS for small corporate sites, in plain PHP 8.3. There's no framework, no Composer dependencies and no Node.
 
 - Every public page is pre-built static HTML.
-- A few tiny PHP endpoints handle forms, the admin and the LLM bridge. These are coming in later milestones.
+- A few tiny PHP endpoints handle forms, the admin and the LLM bridge.
 - Clients edit text and images. Layout and structure change through an LLM chat session, with a preview and an approval step before anything goes live.
 
 See [docs/SPEC.md](docs/SPEC.md) for the full design.
@@ -13,6 +13,7 @@ See [docs/SPEC.md](docs/SPEC.md) for the full design.
 - Milestone 1 (skeleton): a multilingual static builder, the template helper, automatic redirects, single-file backups and the CLI.
 - Milestone 3 (admin): `/_lou/admin.php` with login, click-to-edit text, rich text and images in a live preview, page settings, publish, shareable preview links, submissions/subscribers, redirects, builds and rollback, and backups.
 - Milestone 2 (forms): one submit endpoint for all forms, SQLite storage, SMTP via bundled PHPMailer, Mailchimp/MailerLite/webhook newsletter sign-ups, webhooks, layered spam protection with optional Turnstile/reCAPTCHA, and progressive-enhancement JS.
+- Milestone 4 (LLM bridge): an MCP server at `/_lou/mcp.php` (plus a REST/OpenAPI fallback) that lets any assistant edit a staged copy of `site/`, build a private preview and submit it. An admin reviews the diff, preview and redirect report under **Changes**, then approves (backup, apply, publish, optional Git commit) or rejects. Tokens and connection snippets live under **Assistants**.
 
 ## Quick start
 
@@ -24,6 +25,7 @@ php lou backup          # single-file backup into var/backups/
 php lou restore FILE    # restore a backup (the current state is backed up first)
 php lou submissions     # export form submissions as CSV
 php lou retry           # re-run failed email/newsletter/webhook actions
+php lou token add NAME  # bridge token for an assistant (or create one under Admin → Assistants)
 php tests/run.php       # run the tests
 ```
 
@@ -47,3 +49,15 @@ public/        build output = web root, gitignored
 - `site/content/pages/<page-id>/<lang>.json` is one file per page per language. The page id never changes, and the `slug` is per language.
 - Templates are plain PHP using `$v`: `$v->text('hero.title')`, `$v->url('contact')`, `$v->t('form.send')`, `$v->editable('hero.title')`.
 - Forms: define them under `forms` in `site/config.php`, then use `<form<?= $v->formAttrs('contact') ?>><?= $v->formFields('contact') ?> … <?= $v->captcha('contact') ?></form>`.
+
+## Connecting an assistant
+
+Create a token under **Admin → Assistants**. The page shows ready-to-paste snippets. For Claude Code:
+
+```sh
+claude mcp add --transport http lou https://example.com/_lou/mcp.php --header "Authorization: Bearer lou_…"
+```
+
+Apps that only accept a URL (claude.ai or ChatGPT custom connectors) can use `https://example.com/_lou/mcp.php?key=lou_…` with no authentication set. The assistant only ever writes to `var/staging/`. Templates it writes are checked against an allowlist, because template PHP runs on the server at build time. Nothing goes live until an admin approves it.
+
+Set `'git' => ['commit' => true]` in `site/config.php` to commit `site/` after each approval, if the install is a Git checkout. Lou never pushes.

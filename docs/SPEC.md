@@ -398,26 +398,65 @@ without approval.
 ### Protocols
 
 - **MCP (primary).** `public/_lou/mcp.php` implements the Model Context
-  Protocol's Streamable HTTP transport (JSON-RPC over HTTPS). Tools:
-  `list_files`, `read_file`, `write_file`, `delete_file` (all scoped
-  to staging and to `site/` paths only), `build_preview`, `get_preview_url`,
-  `describe_site` (conventions, field helpers, design tokens).
-- **Auth:** per-assistant bearer tokens created in the admin, revocable.
-  OAuth 2.1 can come later for assistants that require it (for example
-  claude.ai custom connectors).
-- **REST fallback.** The same operations as a small JSON API with an OpenAPI
-  description, for assistants or automations without MCP.
-- **Manual fallback.** Export staging as a zip, or paste a patch, for
-  assistants with neither.
+  Protocol's Streamable HTTP transport: JSON-RPC 2.0 over POST, with plain
+  JSON responses and no SSE stream (GET answers 405). Supported protocol
+  versions: 2025-06-18, 2025-03-26 and 2024-11-05. Methods: `initialize`,
+  `ping`, `tools/list`, `tools/call`. Batches and notifications are accepted.
+- **Tools:** `describe_site` (start here: content model, `$v` helpers,
+  rules, pages, templates, forms, changeset state), `list_files`,
+  `read_file`, `write_file`, `delete_file`, `upload_image` (re-encoded to
+  WebP into staging), `build_preview` (returns the preview URL, warnings and
+  the redirect report), `get_changes` (diffs, problems, conflicts),
+  `submit_for_review` (with a summary for the reviewer), `discard_changes`.
+  Tool failures are returned as results with `isError: true` so the model can
+  fix them.
+- **Auth:** per-assistant bearer tokens (`lou_` + 192 random bits), created
+  under Admin → Assistants or with `php lou token add NAME`, stored as
+  SHA-256 hashes in `var/tokens.json`, revocable. `?key=` is accepted for
+  clients that can only take a URL. Browser `Origin` headers must match
+  `base_url` (or `bridge.allowed_origins`). Failed auth (20 per 15 min per
+  IP) and calls (300 per 10 min per token) are rate-limited. OAuth 2.1 can
+  come later.
+- **REST fallback.** `POST /_lou/mcp.php?tool=<name>` with a JSON object body
+  returns `{"ok": true, "result": …}`. `GET /_lou/mcp.php?openapi` describes
+  it (OpenAPI 3.1, generated from the same tool definitions).
+
+### Staging and approval
+
+- The first write copies `site/` to `var/staging/site` (the working copy) and
+  `var/staging/base` (a snapshot). `var/staging/changeset.json` holds the id,
+  status (`open` / `review`), author and summary.
+- On approval only the files the assistant changed (compared with `base`) are
+  copied into `site/`, so content edits made in the admin in the meantime are
+  kept. A file changed on both sides is a **conflict**: approval is blocked
+  unless the admin ticks "overwrite". `redirects.json` is merged by `from`
+  instead, because live builds add automatic redirects meanwhile.
+- **Approve** validates again, takes a safety backup, applies, publishes
+  (which also publishes any pending admin edits), revokes the changeset
+  preview, logs, and optionally commits `site/` to Git (`'git' => ['commit'
+  => true]`, run without a shell, never pushes). **Reject** discards staging.
+- The approve form carries the changeset id, so a changeset that changed
+  while the admin was looking at it cannot be approved blindly.
 
 ### Guardrails
 
-- The bridge can only touch `site/` (templates, content, assets). It never
-  touches `src/`, `stubs/`, `.env.php`, or `var/` outside staging.
-- PHP in templates is linted (`php -l`) and checked against a deny-list
-  (`exec`, `system`, `eval`, file and network functions, superglobals),
-  because template PHP runs at build time on the server.
-- Size and rate limits apply to writes, and every call is audit-logged.
+- The bridge can only write inside `site/`: `templates/`, `content/`,
+  `assets/`, `config.php`, `menu.json`, `redirects.json`. Paths must be
+  ASCII, with no dotfiles and no `..`. PHP is only allowed in `templates/`
+  and `config.php`. Text files only (php, json, css, js, svg, txt, md,
+  html), images via `upload_image`. Max 512 KB per file, valid UTF-8.
+- **Template PHP is checked against an allowlist** (tokenizer based, not a
+  deny-list), because it runs at build time on the server. Allowed: `$v->…`
+  calls, plain variables, loops and conditions, and a list of pure string,
+  array, math and date functions. Rejected: any other function, `new`,
+  static calls, include/require, eval, backticks, superglobals, closures,
+  variable variables and functions, dynamic member names, method calls on
+  anything but `$v`. Parse errors are reported.
+- JSON must parse. SVG must not contain scripts, event handlers,
+  `javascript:`, `foreignObject` or entities. `config.php` must return an
+  array, and the whole staged site must load (`Site::load`) before a preview
+  or approval.
+- Every write is audit-logged (`source = 'llm'`, actor = token name).
 
 ## 10. Security model (summary)
 

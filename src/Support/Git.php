@@ -1,0 +1,51 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Lou\Support;
+
+/**
+ * Optional history layer: commits site/ after an approved changeset when config 'git' => ['commit' => true]
+ * and the install root is a Git checkout. Runs git without a shell (argument array), never pushes.
+ */
+final class Git
+{
+    public function __construct(private readonly string $root)
+    {
+    }
+
+    public static function available(string $root): bool
+    {
+        return is_dir($root . '/.git') && function_exists('proc_open');
+    }
+
+    /** @return string|null the new commit hash, or null when there was nothing to commit */
+    public function commit(string $message, string $author): ?string
+    {
+        $this->run(['add', '-A', '--', 'site']);
+        if ($this->run(['status', '--porcelain', '--', 'site'], false)[1] === '') {
+            return null;
+        }
+        $this->run(['-c', 'user.name=Lou', '-c', 'user.email=lou@localhost', 'commit', '-q', '-m', $message,
+            '--author=' . preg_replace('/[<>\r\n]/', '', $author) . ' <lou@localhost>', '--', 'site']);
+        return trim($this->run(['rev-parse', '--short', 'HEAD'])[1]);
+    }
+
+    /** @return array{0: int, 1: string} */
+    private function run(array $args, bool $check = true): array
+    {
+        $proc = proc_open(['git', '-C', $this->root, ...$args], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        if (!is_resource($proc)) {
+            throw new \Lou\LouException('Could not run git');
+        }
+        $out = (string) stream_get_contents($pipes[1]);
+        $err = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $code = proc_close($proc);
+        if ($check && $code !== 0) {
+            throw new \Lou\LouException('git ' . $args[0] . ' failed: ' . trim($err ?: $out));
+        }
+        return [$code, trim($out)];
+    }
+}

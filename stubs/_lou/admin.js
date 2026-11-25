@@ -9,6 +9,10 @@
     f.addEventListener('submit', function (e) { if (!window.confirm(f.dataset.confirm)) e.preventDefault(); });
   });
 
+  document.querySelectorAll('[data-select]').forEach(function (i) {
+    i.addEventListener('focus', function () { i.select(); });
+  });
+
   var editor = document.querySelector('.editor');
   if (!editor) return;
   var frame = document.getElementById('preview');

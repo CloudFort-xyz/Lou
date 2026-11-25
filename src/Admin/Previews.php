@@ -56,7 +56,7 @@ final class Previews
     public function create(string $kind, int $ttl, ?string $by = null): string
     {
         $token = bin2hex(random_bytes(16));
-        $this->build($token, $kind === 'editor');
+        $this->build($token, $kind === 'editor', $kind === 'changeset');
         $all = $this->all();
         $all[$token] = ['kind' => $kind, 'created' => gmdate('c'), 'expires' => time() + $ttl, 'by' => $by];
         Fs::writeJson($this->registry(), $all);
@@ -67,7 +67,38 @@ final class Previews
     public function rebuildAll(): void
     {
         foreach ($this->all() as $token => $p) {
-            $this->build($token, $p['kind'] === 'editor');
+            if ($p['kind'] !== 'changeset') {
+                $this->build($token, $p['kind'] === 'editor');
+            }
+        }
+    }
+
+    /**
+     * (Re)build the preview of the LLM's staged changes. Keeps one stable link per changeset.
+     * @return array{token: string, result: array}
+     */
+    public function changeset(?string $by = null): array
+    {
+        $this->cleanup();
+        foreach ($this->all() as $token => $p) {
+            if ($p['kind'] === 'changeset') {
+                return ['token' => $token, 'result' => $this->build($token, false, true)];
+            }
+        }
+        $token = bin2hex(random_bytes(16));
+        $result = $this->build($token, false, true);
+        $all = $this->all();
+        $all[$token] = ['kind' => 'changeset', 'created' => gmdate('c'), 'expires' => time() + 7 * 86400, 'by' => $by];
+        Fs::writeJson($this->registry(), $all);
+        return ['token' => $token, 'result' => $result];
+    }
+
+    public function revokeKind(string $kind): void
+    {
+        foreach ($this->all() as $token => $p) {
+            if ($p['kind'] === $kind) {
+                $this->revoke($token);
+            }
         }
     }
 
@@ -96,15 +127,17 @@ final class Previews
         }
     }
 
-    private function build(string $token, bool $editor): void
+    private function build(string $token, bool $editor, bool $staging = false): array
     {
+        $source = $staging ? (new \Lou\Bridge\Staging($this->app))->app() : $this->app;
         $inject = $editor
             ? '<link rel="stylesheet" href="/_lou/editor.css"><script src="/_lou/editor.js" defer data-page="{page}" data-lang="{lang}"></script>'
             : '';
-        (new Builder($this->app))->build($editor ? View::MODE_EDIT : View::MODE_PREVIEW, $this->baseDir() . '/' . $token, self::urlPrefix($token), $inject);
+        $result = (new Builder($source))->build($editor ? View::MODE_EDIT : View::MODE_PREVIEW, $this->baseDir() . '/' . $token, self::urlPrefix($token), $inject);
         if (!is_file($this->baseDir() . '/.htaccess')) {
             Fs::write($this->baseDir() . '/.htaccess', "Options -Indexes\n<IfModule mod_headers.c>\n    Header always set X-Robots-Tag \"noindex, nofollow\"\n</IfModule>\n");
         }
+        return $result;
     }
 
     private function registry(): string

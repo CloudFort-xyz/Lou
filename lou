@@ -152,6 +152,24 @@ try {
             }
             break;
 
+        case 'token':
+            $tokens = new Lou\Bridge\Tokens($app->varDir . '/tokens.json');
+            $sub = $pos[1] ?? 'list';
+            if ($sub === 'list') {
+                foreach ($tokens->all() as $id => $t) {
+                    echo str_pad($id, 14) . str_pad($t['name'], 30) . 'last used: ' . ($t['last_used'] ?? 'never') . "\n";
+                }
+            } elseif ($sub === 'add') {
+                $token = $tokens->create(implode(' ', array_slice($pos, 2)));
+                echo "$token\nShown once. Bridge URL: " . rtrim((string) $app->config['base_url'], '/') . "/_lou/mcp.php\n";
+            } elseif ($sub === 'revoke') {
+                $tokens->revoke($pos[2] ?? throw new LouException('Usage: php lou token revoke ID'));
+                echo "Token revoked\n";
+            } else {
+                throw new LouException('Usage: php lou token list|add NAME|revoke ID');
+            }
+            break;
+
         case 'version':
             echo 'Lou ' . App::VERSION . "\n";
             break;
@@ -174,6 +192,7 @@ try {
               submissions [--form=ID]         Export submissions as CSV to stdout
               user list|add NAME [--role=admin]|remove NAME
                                               Manage admin users (add prompts for the password)
+              token list|add NAME|revoke ID   Manage LLM bridge tokens (/_lou/mcp.php)
               version                         Show the version
 
             Global: --root=DIR to run against another install.

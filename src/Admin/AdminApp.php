@@ -6,6 +6,8 @@ namespace Lou\Admin;
 
 use Lou\App;
 use Lou\Backup\Backup;
+use Lou\Bridge\Staging;
+use Lou\Bridge\Tokens;
 use Lou\Build\Builder;
 use Lou\Content\ContentStore;
 use Lou\Content\Page;
@@ -15,6 +17,7 @@ use Lou\Http\Request;
 use Lou\Http\Response;
 use Lou\LouException;
 use Lou\Support\Fs;
+use Lou\Support\Git;
 use Lou\Support\Html;
 
 /**
@@ -54,6 +57,13 @@ final class AdminApp
         'GET redirects'       => 'admin',
         'POST redirect'       => 'admin',
         'POST revoke'         => 'admin',
+        'GET changes'         => 'admin',
+        'POST changes-preview' => 'admin',
+        'POST approve'        => 'admin',
+        'POST reject'         => 'admin',
+        'GET assistants'      => 'admin',
+        'POST token-add'      => 'admin',
+        'POST token-revoke'   => 'admin',
     ];
 
     private Request $req;
@@ -460,6 +470,100 @@ final class AdminApp
         return Response::redirect(self::SELF . '?r=redirects');
     }
 
+    // ---------------------------------------------------------------- LLM changesets + assistants
+
+    private function rGetChanges(): Response
+    {
+        $s = new Staging($this->app);
+        if (!$s->exists()) {
+            return $this->page('Changes', 'changes', ['open' => false]);
+        }
+        return $this->page('Changes', 'changes', [
+            'open'      => true,
+            'meta'      => $s->meta(),
+            'files'     => $s->changes(),
+            'diffs'     => $s->diffs(),
+            'problems'  => $s->validate(),
+            'conflicts' => $s->conflicts(),
+            'preview'   => $s->lastPreview(),
+        ]);
+    }
+
+    private function rPostChangesPreview(): Response
+    {
+        $s = new Staging($this->app);
+        $problems = $s->validate();
+        if ($problems) {
+            throw new LouException('The staged site has problems:', $problems);
+        }
+        $p = (new Previews($this->app))->changeset($this->user());
+        $s->recordPreview(rtrim((string) $this->app->config['base_url'], '/') . Previews::urlPrefix($p['token']) . '/', $p['result']);
+        return Response::redirect(self::SELF . '?r=changes');
+    }
+
+    private function rPostApprove(): Response
+    {
+        $s = new Staging($this->app);
+        $meta = $s->meta();
+        if ($this->req->input('id') !== $meta['id']) {
+            throw new LouException('The changeset changed while you were reviewing it. Review it again.');
+        }
+        $safety = (new Backup($this->app))->create(null, null, 30);
+        $applied = $s->apply($this->req->input('force') === '1');
+        (new Previews($this->app))->revokeKind('changeset');
+        $result = (new Builder($this->app))->build();
+        (new Previews($this->app))->rebuildAll();
+        $files = array_merge($applied['added'], $applied['modified'], $applied['deleted']);
+        $this->db->audit('admin', 'approve-changeset', $meta['id'] . ': ' . implode(', ', $files), $this->user());
+
+        $git = null;
+        if (!empty($this->app->config['git']['commit']) && Git::available($this->app->root)) {
+            try {
+                $hash = (new Git($this->app->root))->commit(
+                    ($meta['summary'] !== '' ? $meta['summary'] : 'Changes by ' . $meta['by']) . "\n\nChangeset {$meta['id']} by {$meta['by']}, approved by {$this->user()} in Lou.",
+                    (string) $this->user());
+                $git = $hash ? "Committed to Git as $hash." : null;
+            } catch (LouException $e) {
+                $result['warnings'][] = 'The Git commit failed: ' . $e->getMessage();
+            }
+        }
+        return $this->page('Approved', 'published', ['result' => $result, 'applied' => $applied, 'git' => $git, 'safety' => basename($safety)]);
+    }
+
+    private function rPostReject(): Response
+    {
+        $s = new Staging($this->app);
+        $id = $s->exists() ? $s->meta()['id'] : null;
+        $s->discard();
+        (new Previews($this->app))->revokeKind('changeset');
+        $this->db->audit('admin', 'reject-changeset', $id, $this->user());
+        return $this->page('Rejected', 'message', ['message' => 'The changes were discarded. The live site was not touched.']);
+    }
+
+    private function rGetAssistants(): Response
+    {
+        return $this->page('Assistants', 'assistants', ['tokens' => $this->tokens()->all(), 'newToken' => null]);
+    }
+
+    private function rPostTokenAdd(): Response
+    {
+        $token = $this->tokens()->create($this->req->input('name'));
+        $this->db->audit('admin', 'token-add', $this->req->input('name'), $this->user());
+        return $this->page('Assistants', 'assistants', ['tokens' => $this->tokens()->all(), 'newToken' => $token]);
+    }
+
+    private function rPostTokenRevoke(): Response
+    {
+        $this->tokens()->revoke($this->req->input('id'));
+        $this->db->audit('admin', 'token-revoke', $this->req->input('id'), $this->user());
+        return Response::redirect(self::SELF . '?r=assistants');
+    }
+
+    private function tokens(): Tokens
+    {
+        return new Tokens($this->app->varDir . '/tokens.json');
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /** @return array{0: string, 1: string} */
@@ -500,7 +604,10 @@ final class AdminApp
             'self'        => self::SELF,
             'route'       => (string) ($this->req->query['r'] ?? 'pages'),
             'siteName'    => $this->app->config['name'],
+            'baseUrl'     => (string) $this->app->config['base_url'],
             'unpublished' => $this->session->get('user') ? $this->unpublished() : false,
+            'changeset'   => $this->session->get('user') && $this->role() === 'admin' && (new Staging($this->app))->exists()
+                ? (new Staging($this->app))->meta()['status'] : null,
         ];
         $render = static function (string $__file, array $__vars) use ($e): string {
             extract($__vars, EXTR_SKIP);

@@ -206,7 +206,7 @@ test('admin: submissions export, deletion and redirect management', function () 
 
 test('admin: every screen renders', function () {
     [$admin] = admin_setup();
-    foreach (['pages', 'submissions', 'subscribers', 'builds', 'backups', 'redirects'] as $r) {
+    foreach (['pages', 'submissions', 'subscribers', 'builds', 'backups', 'redirects', 'changes', 'assistants'] as $r) {
         $res = $admin->handle(admin_req('GET', $r, [], ['headers' => ['accept' => 'text/html']]));
         check($res->status === 200, "$r: {$res->status}");
         contains($res->headers['Content-Security-Policy'], "script-src 'self'");
