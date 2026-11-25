@@ -17,6 +17,8 @@
     <a href="<?= $self ?>?r=submissions"<?= str_starts_with($route, 'submission') ? ' aria-current="page"' : '' ?>>Submissions</a>
     <a href="<?= $self ?>?r=subscribers"<?= $route === 'subscribers' ? ' aria-current="page"' : '' ?>>Subscribers</a>
     <?php if ($role === 'admin'): ?>
+      <a href="<?= $self ?>?r=changes"<?= $route === 'changes' ? ' aria-current="page"' : '' ?>>Changes<?php if ($changeset): ?> <span class="badge<?= $changeset === 'review' ? '' : ' badge-warn' ?>"><?= $changeset === 'review' ? 'review' : 'in progress' ?></span><?php endif ?></a>
+      <a href="<?= $self ?>?r=assistants"<?= $route === 'assistants' ? ' aria-current="page"' : '' ?>>Assistants</a>
       <a href="<?= $self ?>?r=redirects"<?= $route === 'redirects' ? ' aria-current="page"' : '' ?>>Redirects</a>
       <a href="<?= $self ?>?r=builds"<?= $route === 'builds' ? ' aria-current="page"' : '' ?>>Builds</a>
       <a href="<?= $self ?>?r=backups"<?= $route === 'backups' ? ' aria-current="page"' : '' ?>>Backups</a>
