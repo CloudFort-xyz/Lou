@@ -22,3 +22,8 @@
 .lou-restore-actions{display:flex;flex-wrap:wrap;gap:.4rem}
 .lou-restore-actions button{background:#2b59c3}
 .lou-restore-actions button+button{background:#3a4254}
+.lou-editbar{display:flex;align-items:center;gap:.4rem}
+.lou-editbar[hidden]{display:none}
+.lou-editbar .lou-format{all:unset;cursor:pointer;min-width:1.7rem;text-align:center;padding:.2rem .35rem;border-radius:.3rem;background:#3a4254;color:#fff;font:600 13px/1.2 Georgia,serif}
+.lou-editbar .lou-format:hover,.lou-editbar .lou-format:focus-visible{background:#2b59c3}
+.lou-editbar .lou-format-italic{font-style:italic}

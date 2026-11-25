@@ -32,7 +32,28 @@
   bar.hidden = true;
   document.body.appendChild(bar);
 
-  function hint(text) { bar.textContent = text; bar.hidden = !text; }
+  var mod = /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘' : 'Ctrl+';
+
+  // Bold/italic run through execCommand ourselves: browsers differ (Firefox's Ctrl+B opens the
+  // bookmarks sidebar instead), and the B / I buttons make it visible for people who don't use shortcuts.
+  function format(cmd) {
+    try { document.execCommand('styleWithCSS', false, false); } catch (e) { /* not supported */ }
+    document.execCommand(cmd, false, null);
+  }
+
+  function hint(text, rich) {
+    bar.textContent = '';
+    if (rich) {
+      [['bold', 'B', 'Bold (' + mod + 'B)'], ['italic', 'I', 'Italic (' + mod + 'I)']].forEach(function (f) {
+        var b = button(f[1], f[2], function () { format(f[0]); });
+        b.className = 'lou-format lou-format-' + f[0];
+        b.addEventListener('mousedown', function (e) { e.preventDefault(); }); // keep the text selection
+        bar.appendChild(b);
+      });
+    }
+    bar.appendChild(document.createTextNode(text));
+    bar.hidden = !text;
+  }
 
   // ------------------------------------------------------------ local backup of unsaved typing
   // The text being typed is kept in localStorage until the admin confirms the server saved it
@@ -80,7 +101,7 @@
   }
 
   document.addEventListener('click', function (e) {
-    if (e.target.closest('.lou-itembar, .lou-restore')) return; // our own toolbars
+    if (e.target.closest('.lou-itembar, .lou-restore, .lou-editbar')) return; // our own toolbars
     var node = e.target.closest('[data-lou-field]');
     if (!node) {
       if (active) {
@@ -108,7 +129,7 @@
     if (node.contentEditable !== 'plaintext-only' && node.contentEditable !== 'true') node.contentEditable = 'true';
     node.focus();
     hint(plain ? 'Editing text. Enter or click outside to save, Esc to cancel.'
-      : 'Editing rich text. Ctrl+B bold, Ctrl+I italic. Click outside to save, Esc to cancel.');
+      : 'Select text, then B or I (' + mod + 'B, ' + mod + 'I). Click outside to save, Esc to cancel.', !plain);
   }, true);
 
   document.addEventListener('input', function () {
@@ -127,9 +148,14 @@
       }
       return;
     }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && /^[biu]$/i.test(e.key)) {
+      e.preventDefault(); // never let the browser take these while editing (Firefox: Ctrl+B = bookmarks sidebar)
+      if (typeOf(active) === 'html') format({ b: 'bold', i: 'italic', u: 'underline' }[e.key.toLowerCase()]);
+      return;
+    }
     if (e.key === 'Escape') { e.preventDefault(); finish(false); }
     else if (e.key === 'Enter' && typeOf(active) === 'text') { e.preventDefault(); finish(true); }
-  });
+  }, true);
 
   // paste as plain text into plain fields
   document.addEventListener('paste', function (e) {
