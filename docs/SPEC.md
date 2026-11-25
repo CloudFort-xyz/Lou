@@ -288,6 +288,10 @@ definition up. Unknown ids are rejected.
   `subscribe` (NewsletterProvider) and `webhook` (generic JSON POST). If an
   action after `store` fails, the submission is kept and marked for retry,
   and the admin shows the failure.
+- **Routing:** an `email` action can pick its recipients from a field, e.g.
+  a topic dropdown: `'to_by' => ['field' => 'topic', 'map' => ['job' =>
+  'hr@client.hu']]`. Values not in the map fall back to `to`. Validate the
+  field with `in:…` so only known values are accepted.
 - **Spam protection** applies to every form: a honeypot field (bots get a
   fake success), a minimum fill time, a per-visitor plus per-form rate limit
   (SQLite, IPs stored only as keyed hashes), an `Origin`/`Referer` check,
