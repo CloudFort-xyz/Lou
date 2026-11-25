@@ -24,6 +24,10 @@
       <button class="btn" type="submit">Save settings</button>
     </form>
     <h2>Your draft</h2>
+    <div class="row undo-row">
+      <button class="btn" type="button" id="undo"<?= $history['undo'] === null ? ' disabled' : '' ?> data-label="<?= $e($history['undo'] ?? '') ?>">↶ Undo</button>
+      <button class="btn" type="button" id="redo"<?= $history['redo'] === null ? ' disabled' : '' ?> data-label="<?= $e($history['redo'] ?? '') ?>">↷ Redo</button>
+    </div>
     <p id="status" class="muted" role="status" aria-live="polite"><?= $drafted ? 'Your changes are saved in your draft. Nobody else sees them until you submit.' : 'No changes yet. Edits are saved to your own draft.' ?></p>
     <p><a class="btn btn-primary" href="<?= $self ?>?r=review">Review and submit</a></p>
     <p><button class="btn btn-link" type="button" id="share">Create a shareable preview link</button><br>
@@ -32,6 +36,13 @@
     <p id="share-result" class="muted"></p>
     <h2>How to edit</h2>
     <p class="muted">Click any highlighted text in the preview to edit it, then click outside to save. Click an image to replace it or change its description.</p>
+    <p class="muted">Repeating parts (cards, columns, gallery images…) show a small toolbar when you point at them: duplicate, move or delete. Duplicate an image, then click the copy to upload a new file.</p>
+    <details class="muted">
+      <summary>Undo, autosave and keyboard shortcuts</summary>
+      <p>Every change is saved to your draft right away. Undo and Redo step through your changes on this page (Ctrl+Z, Ctrl+Shift+Z), even after a reload.</p>
+      <p>While you type, the text is also kept in this browser. If the page closes before it's saved, you're asked whether to restore it next time.</p>
+      <p>Duplicate, move and delete change every language at once, so item 3 stays the same item in each language. Each language copies its own text.</p>
+    </details>
   </aside>
   <iframe class="preview" id="preview" src="<?= $e($preview) ?>" title="Page preview"></iframe>
 </div>

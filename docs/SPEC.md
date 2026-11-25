@@ -114,7 +114,8 @@ site/content/pages/about/hu.json
 - **`fields` is the client-editable surface.** The inline editor can only
   change values inside `fields` (plus `title`, `menu_label` and
   `description`). It never touches templates, `template`, `slug` or
-  structure.
+  structure, apart from duplicating, moving and deleting items of lists that
+  already exist in `fields` (see 8).
 - Field types are inferred from the template: plain text, rich text (a small
   allow-list of tags), image (`src` + `alt`) and link (`page` id or `href`,
   plus `label`).
@@ -180,6 +181,21 @@ Templates are plain PHP files that receive a `View` helper as `$v`.
 - `editable()` prints nothing in production builds. In edit and preview
   builds it adds `data-lou-field="hero.title"` so the inline editor knows
   what to edit. **Production HTML contains no CMS markers.**
+- **Repeating items** come from JSON lists (`"features": [ {...}, {...} ]`).
+  Mark each rendered item with `$v->item("features.$i")` so the editor can
+  duplicate, move and delete it:
+
+  ```php
+  <?php foreach ($v->field('features', []) as $i => $f): ?>
+    <article class="feature"<?= $v->item("features.$i") ?>>
+      <h2<?= $v->editable("features.$i.title") ?>><?= $v->text("features.$i.title") ?></h2>
+    </article>
+  <?php endforeach ?>
+  ```
+
+  Like `editable()`, it prints nothing in production builds. The template
+  decides *what* repeats; editors only decide *how many* and in which order.
+  Adding a new kind of section stays an LLM/developer change.
 - Templates run **only at build time**, never per request.
 
 ## 6. Build and deploy
@@ -372,6 +388,29 @@ expiry).
   it in place: text is contenteditable, and images open an upload/replace
   dialog. Saving writes the JSON field into the person's **draft** (see
   8.1) and rebuilds their preview.
+- **Repeating items:** elements marked with `$v->item()` show a small
+  toolbar on hover or focus: Duplicate, move (↑↓ or ←→, picked from the
+  layout), and Delete (with an inline "Delete this?" step, no browser
+  dialog). The server only changes an existing list in `fields`; the last
+  item can't be deleted, and a list holds at most 100 items. The change is
+  made in **every language whose list has the same length**, so item N is the
+  same item everywhere; each language copies its own text. Languages whose
+  list differs are left alone and named in the editor's status line. A
+  duplicated image is replaced by clicking the copy (the normal image dialog).
+- **Undo/redo** in the editor (buttons, Ctrl+Z, Ctrl+Shift+Z/Ctrl+Y), per
+  person and per page, kept on the server in `var/undo/` (last 50 steps), so
+  it survives reloads. Every editor change records the page's content files
+  before and after. Undo only applies while those files still match what the
+  change produced; if something else changed them since (a publish, an
+  assistant, another tab), the step is dropped with a message instead of
+  overwriting newer work. A new edit clears that page's redo steps. This is
+  separate from History (8.1), which records publishes.
+- **Local backup of typing:** while a field is being edited, `editor.js`
+  keeps its text in `localStorage` (`lou:unsaved:<page>:<lang>:<field>`)
+  until the save succeeds. If the tab closes, crashes or the save fails, the
+  next load of that page asks: "Restore my text" or "Keep the saved version"
+  (and warns when the saved version changed meanwhile). Restoring goes
+  through the normal save, so the server still sanitises it.
 - **Repeatable pages:** templates listed in `config['admin']['repeatable']`
   (e.g. `['job']` for job ads) get **Duplicate** and **Delete** in the page
   list. Duplicate copies the page in every language as `<id>-N` with slug
