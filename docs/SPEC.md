@@ -382,9 +382,12 @@ your draft ──submit──▶ staging (shared) ──publish──▶ site/ �
   through the normal submit and publish. Configurable:
   `'history' => ['keep' => 200, 'days' => 0]` (last N publishes / max age,
   0 = no limit), or `'history' => false`.
-- Later: one editor plus a live viewer (a viewer link that reloads as the
-  editor saves) for showing the client changes in real time; collaborative
-  editing after that.
+- **Live viewer links** show the client changes as the editor makes them.
+  They work like shareable previews of the editor's draft, valid for a day,
+  but every rebuild also writes a static `version.json` next to the
+  preview. `viewer.js` fetches it every 2.5 s while the tab is visible and
+  reloads at the same scroll position when it changes. No PHP, websockets
+  or extra service. Collaborative editing may come later.
 - The editor has a language switcher. Edits apply to the language being
   viewed, and a "missing translations" list shows pages without a file for
   some language.
