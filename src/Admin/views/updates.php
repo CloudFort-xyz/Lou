@@ -42,13 +42,21 @@
     </details>
   <?php endif ?>
 
-  <details class="fold" id="design"><summary><h2><?= $t('Site design from a zip') ?></h2> <small class="muted"><?= $t('deploy templates and assets without Git') ?></small></summary>
-  <p class="muted"><?= $t('Deploy a client site\'s templates and assets without Git: upload a zip of its repository (GitHub: Code → Download ZIP) or any zip with a <code>site/</code> folder. Templates and assets follow the zip, except files changed on the server since the last deploy. Content, menus, settings and uploaded images are never touched. The changes go into your draft, so you review and publish them as usual.') ?></p>
+  <details class="fold" id="design" open><summary><h2><?= $t('Site design from a zip') ?></h2></summary>
+  <p><?= $t('Upload a new version of the site\'s look: its templates, styles, scripts and design images. Texts, menus, settings and uploaded photos stay as they are. Nothing goes live until you have checked a preview and published it.') ?></p>
   <form method="post" action="<?= $self ?>?r=design-upload" enctype="multipart/form-data" class="stack">
     <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
     <label><?= $t('Site zip') ?> <input type="file" name="site" accept=".zip" required></label>
-    <p><button class="btn" type="submit"><?= $t('Import into my draft') ?></button></p>
+    <label class="check"><input type="checkbox" name="review" value="1" checked> <?= $t('Send it to Review right away, with a preview') ?></label>
+    <p><button class="btn btn-primary" type="submit"><?= $t('Upload the design') ?></button></p>
   </form>
+  <details class="tech">
+    <summary><?= $t('How it works') ?></summary>
+    <p><?= $t('Use a zip of the client site\'s repository (GitHub: Code → Download ZIP) or any zip with a <code>site/</code> folder, up to {max}.', ['max' => $maxUpload]) ?>
+      <?= $t('Files under <code>templates/</code> and <code>assets/</code> follow the zip, except files changed on the server since the last deploy: those keep the server\'s version and are listed after the upload.') ?>
+      <?= $t('Content, <code>menu.json</code>, <code>config.php</code> and editor uploads are never touched. Templates go through the same safety checks as assistants\' templates.') ?></p>
+    <p><?= $t('The changes land in your draft. With “Send it to Review” ticked and nothing else in your draft, they are submitted to staging at once and the preview is built; otherwise submit them under Review yourself.') ?></p>
+  </details>
   </details>
 
   <?php if ($needsBuild): ?>

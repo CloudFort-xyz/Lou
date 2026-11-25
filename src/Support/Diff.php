@@ -63,6 +63,47 @@ final class Diff
         return $out;
     }
 
+    /**
+     * Word-level diff of two texts, for showing a changed sentence inline: runs of [op, text] where op is
+     * ' ' (same), '-' (removed) or '+' (added). Whitespace stays attached, so joining the ' ' and '-' runs
+     * gives $old back and joining ' ' and '+' gives $new. Too large to compare: one removal and one addition.
+     * @return list<array{0: string, 1: string}>
+     */
+    public static function words(string $old, string $new): array
+    {
+        $split = static fn (string $s): array => $s === '' ? [] : (preg_split('/(?<=\s)(?=\S)/u', $s) ?: [$s]);
+        $a = $split($old);
+        $b = $split($new);
+        $pre = 0;
+        while ($pre < count($a) && $pre < count($b) && $a[$pre] === $b[$pre]) {
+            $pre++;
+        }
+        $suf = 0;
+        while ($suf < count($a) - $pre && $suf < count($b) - $pre && $a[count($a) - 1 - $suf] === $b[count($b) - 1 - $suf]) {
+            $suf++;
+        }
+        $ma = array_slice($a, $pre, count($a) - $pre - $suf);
+        $mb = array_slice($b, $pre, count($b) - $pre - $suf);
+        $ops = (count($ma) + 1) * (count($mb) + 1) > 250_000
+            ? [['-', implode('', $ma)], ['+', implode('', $mb)]]
+            : self::lcsOps($ma, $mb);
+        array_unshift($ops, [' ', implode('', array_slice($a, 0, $pre))]);
+        $ops[] = [' ', implode('', array_slice($a, count($a) - $suf))];
+        $out = [];
+        foreach ($ops as [$op, $text]) {
+            if ($text === '') {
+                continue;
+            }
+            $last = count($out) - 1;
+            if ($last >= 0 && $out[$last][0] === $op) {
+                $out[$last][1] .= $text;
+            } else {
+                $out[] = [$op, $text];
+            }
+        }
+        return $out;
+    }
+
     /** @return list<array{0: string, 1: string}> */
     private static function lcsOps(array $a, array $b): array
     {

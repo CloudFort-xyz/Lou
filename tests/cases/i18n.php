@@ -23,6 +23,25 @@ function i18n_keys(): array
     foreach ($m[1] as $lit) {
         $keys[stripcslashes($lit)] = 'admin.js';
     }
+    // the Review screen's change descriptions
+    preg_match_all('/say\(\$tr, \'((?:[^\'\\\\]|\\\\.)*)\'/', (string) file_get_contents(dirname(__DIR__, 2) . '/src/Content/ChangeList.php'), $m);
+    foreach ($m[1] as $lit) {
+        $keys[stripcslashes($lit)] = 'ChangeList.php';
+    }
+    $consts = (new ReflectionClass(Lou\Content\ChangeList::class))->getConstants();
+    foreach ([...array_values($consts['GROUPS']), ...array_values($consts['LANGUAGES']), ...array_values($consts['PAGE_KEYS']), 'yes', 'no'] as $text) {
+        $keys[$text] = 'ChangeList.php';
+    }
+    // Users' own messages reach the admin as exceptions, translated where they are shown
+    preg_match_all('/new LouException\(\'([^\'.]*\.?)\'\)/', (string) file_get_contents(dirname(__DIR__, 2) . '/src/Admin/Users.php'), $m);
+    foreach ($m[1] as $lit) {
+        $keys[$lit] = 'Users.php';
+    }
+    $keys['Passwords must be at least 10 characters'] = 'Users.php';
+    // values shown through $t($value): submission and subscriber states, kinds of change
+    foreach (['ok', 'partial', 'failed', 'synced', 'added', 'modified', 'changed', 'deleted'] as $text) {
+        $keys[$text] = 'dynamic';
+    }
     return $keys;
 }
 
@@ -38,6 +57,8 @@ test('i18n: every admin text has a Hungarian translation with the same placehold
     $hu = require dirname(__DIR__, 2) . '/src/Admin/lang/hu.php';
     $keys = i18n_keys();
     check(count($keys) > 300, 'the extractor found only ' . count($keys) . ' texts');
+    $unused = array_diff_key($hu, $keys);
+    check(!$unused, "translations nothing uses any more (remove them):\n  " . implode("\n  ", array_keys($unused)));
     $missing = array_diff_key($keys, $hu);
     check(!$missing, "missing Hungarian translations:\n  " . implode("\n  ", array_map(fn ($k, $f) => "$f: $k", array_keys($missing), $missing)));
     foreach ($hu as $en => $text) {

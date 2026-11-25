@@ -57,7 +57,7 @@ $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
   <a class="topbar-brand" href="<?= $self ?>?r=dashboard" title="<?= $t('Dashboard') ?>">Lou</a>
   <a class="topbar-site" href="<?= $e($siteUrl) ?>" target="_blank" rel="noopener"><?= $e($siteName) ?> <?= $svg('ext') ?><span class="sr"><?= $t('(opens the live site)') ?></span></a>
   <?php if ($staged || $drafted): ?>
-    <a class="topbar-status" href="<?= $self ?>?r=review"><?= $staged ? $t('{n} staged', ['n' => $staged]) : $t('Draft') ?><span class="hide-sm"><?= $staged ? $t(', waiting to publish') : $t(' not submitted') ?></span></a>
+    <a class="topbar-status" href="<?= $self ?>?r=review"><?= $staged ? $t('{n} staged', ['n' => $staged]) : $t('Draft') ?><span class="hide-sm"><?= $staged ? ',&nbsp;' . $t('waiting to publish') : '&nbsp;' . $t('not submitted') ?></span></a>
   <?php endif ?>
   <span class="topbar-spacer"></span>
   <a class="topbar-user" href="<?= $self ?>?r=profile" title="<?= $t('Your profile and preferences') ?>"><span class="hide-sm"><?= $t('Signed in as') ?> </span><strong><?= $e($user) ?></strong> <span class="topbar-role"><?= $role === 'admin' ? $t('admin') : $t('editor') ?></span></a>

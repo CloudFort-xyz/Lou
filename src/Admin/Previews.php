@@ -90,11 +90,35 @@ final class Previews
         return ['token' => $token, 'result' => $this->lastResult];
     }
 
-    /** Rebuild the previews that show $source; null = all of them (after staging or site/ changed). */
-    public function rebuild(?string $source = null): void
+    /**
+     * (Re)build the review preview of staging and remember it (link, page count, warnings, URL changes) for the
+     * Review screen. Submitting builds it straight away, so the reviewer finds a ready preview. Returns null and
+     * builds nothing when staging is empty, has problems (Review lists them) or fails to build.
+     * @return ?array{token: string, result: array}
+     */
+    public function staging(string $siteUrl, ?string $by = null): ?array
+    {
+        $s = Workspace::staging($this->app);
+        if (!$s->exists() || $s->validate()) {
+            return null;
+        }
+        try {
+            $p = $this->stable('staging', 'staging', $by);
+        } catch (LouException) {
+            return null; // "Build preview" on Review shows the error
+        }
+        $s->recordPreview(rtrim($siteUrl, '/') . self::urlPrefix($p['token']) . '/', $p['result']);
+        return $p;
+    }
+
+    /**
+     * Rebuild the previews that show $source; null = all of them (after staging or site/ changed).
+     * @param list<string> $skip tokens just built
+     */
+    public function rebuild(?string $source = null, array $skip = []): void
     {
         foreach ($this->all() as $token => $p) {
-            if ($source !== null && ($p['source'] ?? 'site') !== $source) {
+            if (in_array($token, $skip, true) || ($source !== null && ($p['source'] ?? 'site') !== $source)) {
                 continue;
             }
             try {

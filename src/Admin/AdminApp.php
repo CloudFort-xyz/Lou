@@ -13,6 +13,7 @@ use Lou\Backup\Backup;
 use Lou\Bridge\Tokens;
 use Lou\Build\Builder;
 use Lou\Build\Output;
+use Lou\Content\ChangeList;
 use Lou\Content\ContentStore;
 use Lou\Content\History;
 use Lou\Content\Page;
@@ -83,6 +84,7 @@ final class AdminApp
         'GET review'          => 'editor',
         'POST review-preview' => 'editor',
         'POST reject'         => 'editor',
+        'POST staging-revert' => 'editor',
         'GET history'         => 'editor',
         'GET history-entry'   => 'editor',
         'POST history-restore' => 'editor',
@@ -515,12 +517,26 @@ final class AdminApp
         if ($conflicts && $this->req->input('force') !== '1') {
             return $this->page($this->tr('Conflict'), 'conflict', ['conflicts' => $conflicts, 'summary' => $this->req->input('summary')], 409);
         }
-        $files = $d->apply($this->req->input('force') === '1');
-        Workspace::staging($this->app)->addSubmission($this->owner(), $this->req->input('summary'), $files);
+        $files = $this->submitDraft($d, $this->req->input('summary'), $this->req->input('force') === '1', $ready);
+        return $this->done('review', $this->tr('Submitted {n} change to staging.|Submitted {n} changes to staging.', ['n' => count($files)])
+            . ($ready ? ' ' . $this->tr('The preview is ready.') : ''));
+    }
+
+    /**
+     * Draft → staging, then build the staging preview straight away so the reviewer finds it ready, and refresh
+     * the other previews (drafts show staging). $ready: whether the preview could be built.
+     * @return list<string> the submitted files
+     */
+    private function submitDraft(Workspace $d, string $summary, bool $force, ?bool &$ready = null): array
+    {
+        $files = $d->apply($force);
+        Workspace::staging($this->app)->addSubmission($this->owner(), $summary, $files);
         $previews = new Previews($this->app);
-        $previews->rebuild();
+        $p = $previews->staging($this->app->siteUrl($this->req), $this->user());
+        $previews->rebuild(null, $p ? [$p['token']] : []);
+        $ready = $p !== null;
         $this->db->audit('editor', 'submit', implode(', ', $files), $this->user());
-        return $this->done('review', $this->tr('Submitted {n} file to staging.|Submitted {n} files to staging.', ['n' => count($files)]));
+        return $files;
     }
 
     /** Throw away (some of) my draft: the given files, or all of it. */
@@ -530,7 +546,7 @@ final class AdminApp
         $files ? $this->draft()->revert($files) : $this->draft()->discard();
         (new Previews($this->app))->rebuild('draft:' . $this->owner());
         $this->db->audit('editor', 'revert', $files ? implode(', ', $files) : 'all', $this->user());
-        return $this->done('review', $files ? $this->tr('Took their version of {n} file.|Took their version of {n} files.', ['n' => count($files)]) : $this->tr('Your draft was discarded.'));
+        return $this->done('review', $files ? $this->tr('Undid {n} change in your draft.|Undid {n} changes in your draft.', ['n' => count($files)]) : $this->tr('Your draft was discarded.'));
     }
 
     private function rGetReview(): Response
@@ -544,10 +560,11 @@ final class AdminApp
                 $drafts[] = ['owner' => $d->owner, 'files' => count($d->changedFiles()), 'updated' => $d->meta()['updated']];
             }
         }
-        $vars = ['open' => $s->exists(), 'mine' => $mine->hasChanges() ? ['files' => $mine->changedFiles(), 'conflicts' => $mine->conflicts()] : null,
-            'drafts' => $drafts];
+        $vars = ['open' => $s->exists(), 'drafts' => $drafts, 'live' => is_file($this->app->varDir . '/live.json') ? Fs::readJson($this->app->varDir . '/live.json') : null,
+            'mine' => $mine->hasChanges() ? ['items' => ChangeList::of($mine, $md = $mine->diffs(), $this->i18n()->plain(...)), 'diffs' => $md, 'conflicts' => $mine->conflicts()] : null];
         if ($s->exists()) {
-            $vars += ['meta' => $s->meta(), 'files' => $s->changes(), 'diffs' => $s->diffs(), 'problems' => $s->validate(),
+            $diffs = $s->diffs();
+            $vars += ['meta' => $s->meta(), 'diffs' => $diffs, 'items' => ChangeList::of($s, $diffs, $this->i18n()->plain(...)), 'problems' => $s->validate(),
                 'conflicts' => $s->conflicts(), 'preview' => $s->lastPreview()];
         }
         return $this->page($this->tr('Review'), 'review', $vars);
@@ -562,7 +579,7 @@ final class AdminApp
         }
         $p = (new Previews($this->app))->stable('staging', 'staging', $this->user());
         $s->recordPreview($this->app->siteUrl($this->req) . Previews::urlPrefix($p['token']) . '/', $p['result']);
-        return $this->done('review', $this->tr('The preview of staging is ready.'));
+        return $this->done('review', $this->tr('The preview is up to date.'));
     }
 
     /** Staging → site/ → live build. Without staging, just builds site/ (e.g. after redirect changes). */
@@ -864,13 +881,43 @@ final class AdminApp
         if (!is_array($file) || ($file['error'] ?? 1) !== UPLOAD_ERR_OK || !$this->isUploaded((string) $file['tmp_name'])) {
             throw new LouException($this->tr('Upload a site .zip'));
         }
-        $r = (new DesignImport($this->app))->toDraft((string) $file['tmp_name'], $this->draft());
-        $this->db->audit('admin', 'design-upload', count($r['written']) . ' written, ' . count($r['deleted']) . ' deleted, '
+        $name = mb_substr(basename(str_replace('\\', '/', (string) ($file['name'] ?? ''))), 0, 100) ?: 'a zip';
+        $draft = $this->draft();
+        $draft->rebase();
+        $hadDraft = $draft->hasChanges();
+        $r = (new DesignImport($this->app))->toDraft((string) $file['tmp_name'], $draft);
+        $this->db->audit('admin', 'design-upload', "$name: " . count($r['written']) . ' written, ' . count($r['deleted']) . ' deleted, '
             . count($r['skipped']) . ' skipped, ' . count($r['rejected']) . ' rejected', $this->user());
-        if ($r['written'] || $r['deleted']) {
-            (new Previews($this->app))->rebuild();
+        $r += ['name' => $name, 'submitted' => false, 'held' => null, 'ready' => false];
+        if (!$r['written'] && !$r['deleted']) {
+            return $this->page($this->tr('Site design'), 'design-import', $r);
         }
-        return $this->page($this->tr('Site design imported'), 'design-import', $r);
+        // Straight to staging when asked and the draft held nothing else, so the reviewer gets a ready preview.
+        // Otherwise it waits in the draft, and the result page says why.
+        $r['held'] = match (true) {
+            $this->req->input('review') !== '1' => null,
+            $hadDraft                           => 'draft',
+            (bool) $draft->conflicts()          => 'conflicts',
+            default                             => false,
+        };
+        if ($r['held'] === false) {
+            try {
+                $this->submitDraft($draft, $this->tr('Site design from {name}', ['name' => $name]), false, $ready);
+                $r['submitted'] = true;
+                $r['ready'] = (bool) $ready;
+            } catch (LouException $e) {
+                $r['held'] = 'problems';
+                $r['problems'] = [$e->getMessage()];
+            }
+        }
+        if (!$r['submitted']) {
+            (new Previews($this->app))->rebuild('draft:' . $this->owner());
+        } elseif (!$r['skipped'] && !$r['rejected']) {
+            return $this->done('review', $this->tr('The new design from {name} is on staging ({changes}).', ['name' => $name,
+                'changes' => $this->tr('{n} change|{n} changes', ['n' => count($r['written']) + count($r['deleted'])])])
+                . ($r['ready'] ? ' ' . $this->tr('Check the preview, then publish.') : ''));
+        }
+        return $this->page($this->tr('Site design'), 'design-import', $r);
     }
 
     /** Rebuild the live site and previews with the code on disk (after an update). */
@@ -1021,7 +1068,29 @@ final class AdminApp
         $previews->revokeSource('staging');
         $previews->rebuild();
         $this->db->audit('editor', 'reject-staging', implode(', ', $files), $this->user());
-        return $this->page($this->tr('Rejected'), 'message', ['message' => $this->tr('Everything on staging was discarded. The live site was not touched.')]);
+        return $this->done('review', $this->tr('Everything on staging was discarded. The live site was not touched.'));
+    }
+
+    /** Take single changes back off staging (they return to the live version); the rest stays for review. */
+    private function rPostStagingRevert(): Response
+    {
+        $s = Workspace::staging($this->app);
+        $files = array_values(array_intersect(array_filter((array) ($this->req->post['files'] ?? []), 'is_string'), $s->changedFiles()));
+        if (!$files) {
+            throw new LouException($this->tr('That change is no longer on staging.'));
+        }
+        $s->revert($files);
+        $previews = new Previews($this->app);
+        if (!$s->hasChanges()) {
+            $s->discard();
+            $previews->revokeSource('staging');
+            $previews->rebuild();
+        } else {
+            $p = $previews->staging($this->app->siteUrl($this->req), $this->user());
+            $previews->rebuild(null, $p ? [$p['token']] : []);
+        }
+        $this->db->audit('editor', 'unstage', implode(', ', $files), $this->user());
+        return $this->done('review', $this->tr('Took {n} change off staging. The live site was not touched.|Took {n} changes off staging. The live site was not touched.', ['n' => count($files)]));
     }
 
     // ---------------------------------------------------------------- history
