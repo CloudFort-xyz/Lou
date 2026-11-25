@@ -201,6 +201,38 @@ final class Release
     }
 
     /** The public key shipped with this install, or null when updates are not signature-checked. */
+    /**
+     * Reads a release zip's version and signature state without unpacking it.
+     * signature: 'valid', 'missing' (no release.sig), 'invalid' (doesn't match), or 'unchecked' (no key to check against).
+     * @param string|false|null $publicKey as in extract()
+     * @return array{version: string, signature: string}
+     */
+    public static function inspect(string $zipFile, string|false|null $publicKey = null): array
+    {
+        $publicKey = $publicKey === null ? self::trustedKey() : ($publicKey ?: null);
+        $zip = new \ZipArchive();
+        if ($zip->open($zipFile, \ZipArchive::RDONLY) !== true) {
+            throw new LouException('This is not a zip file');
+        }
+        try {
+            $raw = $zip->getFromName(self::DIR . '/release.json');
+            $manifest = is_string($raw) ? json_decode($raw, true) : null;
+            if (!is_array($manifest) || ($manifest['name'] ?? '') !== 'lou' || !is_string($manifest['version'] ?? null)) {
+                throw new LouException('This is not a Lou release zip (no lou/release.json). Download lou-<version>.zip from the releases page.');
+            }
+            $sig = $zip->getFromName(self::DIR . '/release.sig');
+            $signature = match (true) {
+                $publicKey === null                   => 'unchecked',
+                !is_string($sig) || trim($sig) === '' => 'missing',
+                self::verify((string) $raw, trim($sig), $publicKey) => 'valid',
+                default                               => 'invalid',
+            };
+            return ['version' => $manifest['version'], 'signature' => $signature];
+        } finally {
+            $zip->close();
+        }
+    }
+
     public static function trustedKey(): ?string
     {
         if (!is_file(self::KEY_FILE)) {

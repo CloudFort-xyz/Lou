@@ -23,4 +23,8 @@ return [
         // 'integrately_newsletter' => 'https://webhooks.integrately.com/…',
     ],
     // 'webhook_secret' => '',                // optional: adds X-Lou-Signature: sha256=<hmac of body>
+
+    // 'allow_unsigned_updates' => true,      // let admins install update zips that aren't signed with Lou's release key
+                                              // (test builds), after a security warning. Off by default: lives here so it
+                                              // needs FTP/SSH access, not just an admin login.
 ];

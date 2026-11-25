@@ -269,6 +269,52 @@ test('admin: Updates applies an uploaded release, then the banner asks for a reb
     check($editor->handle(admin_req('GET', 'updates', [], $html))->status === 403, 'editors cannot update');
 });
 
+test('admin: unsigned release zips need the .env.php switch, a security warning and the typed version', function () {
+    if (!function_exists('sodium_crypto_sign_keypair')) {
+        return;
+    }
+    [$admin, $session, $app] = admin_setup();
+    $keys = Release::keyPair();
+    $admin->useUpdater(new Updater($app, new FakeReleaseHttp([]), $keys['public']));
+    $html = ['headers' => ['accept' => 'text/html']];
+    $upload = fn (string $zip) => $admin->handle(admin_req('POST', 'update-upload', [], $html, ['release' => ['tmp_name' => $zip, 'error' => UPLOAD_ERR_OK, 'name' => basename($zip)]]));
+    $installed = fn () => is_file($app->root . '/src/App.php') ? (string) file_get_contents($app->root . '/src/App.php') : '';
+
+    // switched off (the default): refused, with how to allow it
+    $r = $upload(release_zip('9.0.1'));
+    check($r->status === 200 && str_contains($r->body, 'not signed') && str_contains($r->body, 'allow_unsigned_updates'), strip_tags($r->body));
+    check(!str_contains($installed(), "'9.0.1'"), 'not installed');
+    check(Release::inspect(release_zip('9.0.1', Release::keyPair()), $keys['public'])['signature'] === 'invalid', 'other key = invalid');
+
+    // switched on in .env.php: warning page, nothing installed yet
+    file_put_contents($app->envFile(), "<?php return ['allow_unsigned_updates' => true];");
+    $r = $upload(release_zip('9.0.1'));
+    contains($r->body, 'Security warning');
+    contains($r->body, '<code>9.0.1</code>');
+    check(!str_contains($installed(), "'9.0.1'"), 'still not installed before confirming');
+    preg_match('/name="token" value="([a-f0-9]{32})"/', $r->body, $m);
+    $token = $m[1] ?? '';
+    check(is_file($app->varDir . "/updates/unsigned-$token.zip"), 'zip parked');
+
+    $confirm = fn (string $typed, string $t) => $admin->handle(admin_req('POST', 'update-unsigned', ['token' => $t, 'confirm' => $typed], $html));
+    check(str_contains($confirm('yes', $token)->body, 'type the version') && !str_contains($installed(), "'9.0.1'"), 'wrong confirmation refused');
+    check(str_contains($confirm('9.0.1', str_repeat('a', 32))->body, 'expired'), 'unknown token refused');
+    $r = $confirm('9.0.1', $token);
+    check($r->status === 303 && str_contains($installed(), "'9.0.1'"), 'installed after confirming: ' . strip_tags($r->body));
+    check(!is_file($app->varDir . "/updates/unsigned-$token.zip") && $session->get('unsignedUpload') === null, 'parked zip removed');
+    check(str_contains($confirm('9.0.1', $token)->body, 'expired'), 'a token works once');
+
+    // signed zips still go straight through
+    $r = $upload(release_zip('9.0.2', $keys));
+    check($r->status === 303 && str_contains($installed(), "'9.0.2'"), 'signed zip installs without the warning');
+
+    // the switch lives in .env.php only: without it, the confirm step refuses too
+    $r = $upload(release_zip('9.0.3'));
+    preg_match('/name="token" value="([a-f0-9]{32})"/', $r->body, $m);
+    unlink($app->envFile());
+    check(str_contains($confirm('9.0.3', $m[1])->body, 'not allowed') && !str_contains($installed(), "'9.0.3'"), 'switch checked again on confirm');
+});
+
 // ------------------------------------------------------------------------- installer
 
 test('installer: needs the setup key, builds the site, creates the admin last and locks itself', function () {

@@ -35,6 +35,7 @@
       <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
       <label>Release zip <input type="file" name="release" accept=".zip" required></label>
       <label class="check"><input type="checkbox" name="allow_older" value="1"> Allow an older version (going back after a bad update)</label>
+      <?php if ($unsignedAllowed): ?><p class="muted">Unsigned zips (test builds) are allowed on this install by <code>.env.php</code>. You'll see a security warning and confirm before one is installed.</p><?php endif ?>
       <p><button class="btn" type="submit">Upload and update</button></p>
     </form>
   <?php endif ?>
