@@ -57,7 +57,7 @@ final class App
      * Install settings (var/settings.json), changed in the admin or written by the installer.
      * They belong to this server, not to the site, so they override site/config.php.
      */
-    public const SETTINGS = ['base_url', 'mail', 'output_dir', 'output_swap'];
+    public const SETTINGS = ['base_url', 'mail', 'output_dir', 'output_swap', 'admin_language'];
 
     /** The mail keys the admin may set (mail.transport, mail.from, mail.from_name). */
     public const MAIL_SETTINGS = ['transport', 'from', 'from_name'];

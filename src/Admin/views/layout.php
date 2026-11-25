@@ -1,21 +1,24 @@
 <?php
 /** @var callable $e */
+/** @var Lou\Admin\I18n $t */
 // Sidebar menu: [route, label, icon, roles, matches(route) or null for exact].
 $menu = [
-    ['dashboard', 'Dashboard', 'home', 'editor'],
-    ['pages', 'Pages', 'file', 'editor'],
-    ['review', 'Review', 'check', 'editor', null, $staged],
-    ['history', 'History', 'clock', 'editor', 'history'],
+    ['dashboard', $t->plain('Dashboard'), 'home', 'editor'],
+    ['pages', $t->plain('Pages'), 'file', 'editor'],
+    ['review', $t->plain('Review'), 'check', 'editor', null, $staged],
+    ['history', $t->plain('History'), 'clock', 'editor', 'history'],
     '-',
-    ['submissions', 'Submissions', 'inbox', 'editor', 'submission'],
-    ['subscribers', 'Subscribers', 'mail', 'editor'],
+    ['submissions', $t->plain('Submissions'), 'inbox', 'editor', 'submission'],
+    ['subscribers', $t->plain('Subscribers'), 'mail', 'editor'],
     '-',
-    ['assistants', 'Assistants', 'spark', 'admin'],
-    ['redirects', 'Redirects', 'shuffle', 'admin'],
-    ['builds', 'Builds', 'layers', 'admin'],
-    ['backups', 'Backups', 'archive', 'admin'],
-    ['updates', 'Updates', 'download', 'admin'],
-    ['settings', 'Settings', 'gear', 'admin'],
+    ['assistants', $t->plain('Assistants'), 'spark', 'admin'],
+    ['redirects', $t->plain('Redirects'), 'shuffle', 'admin'],
+    ['builds', $t->plain('Builds'), 'layers', 'admin'],
+    ['backups', $t->plain('Backups'), 'archive', 'admin'],
+    ['updates', $t->plain('Updates'), 'download', 'admin'],
+    ['settings', $t->plain('Settings'), 'gear', 'admin'],
+    '-',
+    ['profile', $t->plain('Profile'), 'user', 'editor'],
 ];
 // Small stroke icons (24×24 viewBox), drawn with currentColor so they follow the menu colours.
 $icons = [
@@ -33,12 +36,13 @@ $icons = [
     'download' => '<path d="M12 4v11M7 10l5 5 5-5"/><path d="M4 19h16"/>',
     'ext'     => '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v6H4V6h6"/>',
     'menu'    => '<path d="M4 6h16M4 12h16M4 18h16"/>',
+    'user'    => '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
 ];
 $svg = static fn (string $name): string => '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' . $icons[$name] . '</svg>';
 $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
 ?>
 <!doctype html>
-<html lang="en">
+<html lang="<?= $e($uiLang) ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -46,23 +50,23 @@ $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
 <title><?= $e($title) ?> · <?= $e($siteName) ?> · Lou</title>
 <link rel="stylesheet" href="/_lou/admin.css">
 </head>
-<body class="<?= $user ? 'shell' : 'guest' ?>" data-csrf="<?= $e($csrf) ?>" data-self="<?= $e($self) ?>">
+<body class="<?= $user ? 'shell' : 'guest' ?>" data-csrf="<?= $e($csrf) ?>" data-self="<?= $e($self) ?>" data-date="<?= $e($datePatterns[0]) ?>" data-time="<?= $e($datePatterns[1]) ?>"<?php if ($t->js()): ?> data-i18n="<?= $e(json_encode($t->js(), JSON_UNESCAPED_UNICODE)) ?>"<?php endif ?>>
 <?php if ($user): ?>
 <header class="topbar">
-  <button class="topbar-toggle" type="button" id="menu-toggle" aria-controls="sidebar" aria-expanded="false"><?= $svg('menu') ?><span class="sr">Menu</span></button>
-  <a class="topbar-brand" href="<?= $self ?>?r=dashboard" title="Dashboard">Lou</a>
-  <a class="topbar-site" href="<?= $e($siteUrl) ?>" target="_blank" rel="noopener"><?= $e($siteName) ?> <?= $svg('ext') ?><span class="sr">(opens the live site)</span></a>
+  <button class="topbar-toggle" type="button" id="menu-toggle" aria-controls="sidebar" aria-expanded="false"><?= $svg('menu') ?><span class="sr"><?= $t('Menu') ?></span></button>
+  <a class="topbar-brand" href="<?= $self ?>?r=dashboard" title="<?= $t('Dashboard') ?>">Lou</a>
+  <a class="topbar-site" href="<?= $e($siteUrl) ?>" target="_blank" rel="noopener"><?= $e($siteName) ?> <?= $svg('ext') ?><span class="sr"><?= $t('(opens the live site)') ?></span></a>
   <?php if ($staged || $drafted): ?>
-    <a class="topbar-status" href="<?= $self ?>?r=review"><?= $staged ? (int) $staged . ' staged' : 'Draft' ?><span class="hide-sm"><?= $staged ? ', waiting to publish' : ' not submitted' ?></span></a>
+    <a class="topbar-status" href="<?= $self ?>?r=review"><?= $staged ? $t('{n} staged', ['n' => $staged]) : $t('Draft') ?><span class="hide-sm"><?= $staged ? $t(', waiting to publish') : $t(' not submitted') ?></span></a>
   <?php endif ?>
   <span class="topbar-spacer"></span>
-  <span class="topbar-user"><span class="hide-sm">Signed in as </span><strong><?= $e($user) ?></strong> <span class="topbar-role"><?= $e($role) ?></span></span>
+  <a class="topbar-user" href="<?= $self ?>?r=profile" title="<?= $t('Your profile and preferences') ?>"><span class="hide-sm"><?= $t('Signed in as') ?> </span><strong><?= $e($user) ?></strong> <span class="topbar-role"><?= $role === 'admin' ? $t('admin') : $t('editor') ?></span></a>
   <form method="post" action="<?= $self ?>?r=logout" class="inline">
     <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
-    <button class="topbar-btn" type="submit">Log out</button>
+    <button class="topbar-btn" type="submit"><?= $t('Log out') ?></button>
   </form>
 </header>
-<nav class="sidebar" id="sidebar" aria-label="Admin menu">
+<nav class="sidebar" id="sidebar" aria-label="<?= $t('Admin menu') ?>">
   <ul>
   <?php foreach ($menu as $item):
       if ($item === '-'): ?><li class="sep" role="separator"></li><?php continue; endif;
@@ -71,20 +75,20 @@ $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
       $prefix = $item[4] ?? null;
       $current = $prefix !== null ? str_starts_with($route, $prefix) : $route === $r;
       $count = (int) ($item[5] ?? 0); ?>
-    <li><a href="<?= $self ?>?r=<?= $r ?>"<?= $current ? ' aria-current="page"' : '' ?>><?= $svg($icon) ?><span><?= $e($label) ?></span><?php if ($count): ?><span class="count" title="<?= $count ?> staged"><?= $count ?></span><?php endif ?></a></li>
+    <li><a href="<?= $self ?>?r=<?= $r ?>"<?= $current ? ' aria-current="page"' : '' ?>><?= $svg($icon) ?><span><?= $e($label) ?></span><?php if ($count): ?><span class="count" title="<?= $t('{n} staged', ['n' => $count]) ?>"><?= $count ?></span><?php endif ?></a></li>
   <?php endforeach ?>
   </ul>
 </nav>
 <?php endif ?>
 <main class="<?= $user ? 'content' : 'wrap' ?>">
 <?php if (!empty($user) && !empty($baseUrlMissing) && $route !== 'settings'): ?>
-  <div class="notice notice-error"><strong>The site address is not set.</strong> The sitemap, search engine links and the bridge URL need it.
-    <?php if ($role === 'admin'): ?><a href="<?= $self ?>?r=settings">Set it in Settings</a>.<?php else: ?>Ask an admin to set it under Settings.<?php endif ?></div>
+  <div class="notice notice-error"><strong><?= $t('The site address is not set.') ?></strong> <?= $t('The sitemap, search engine links and the bridge URL need it.') ?>
+    <?php if ($role === 'admin'): ?><a href="<?= $self ?>?r=settings"><?= $t('Set it in Settings') ?></a>.<?php else: ?><?= $t('Ask an admin to set it under Settings.') ?><?php endif ?></div>
 <?php endif ?>
 <?php if (!empty($user) && !empty($needsRebuild) && !in_array($route, ['rebuild', 'updates'], true)): ?>
-  <div class="notice notice-warn"><strong>Lou was updated to <?= $e($louVersion) ?>.</strong> Rebuild the site once so it uses the new version.
-    <?php if ($role === 'admin'): ?><form method="post" action="<?= $self ?>?r=rebuild" class="inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="btn" type="submit">Rebuild now</button></form>
-    <?php else: ?>Ask an admin to rebuild it under Updates.<?php endif ?></div>
+  <div class="notice notice-warn"><strong><?= $t('Lou was updated to {version}.', ['version' => $louVersion]) ?></strong> <?= $t('Rebuild the site once so it uses the new version.') ?>
+    <?php if ($role === 'admin'): ?><form method="post" action="<?= $self ?>?r=rebuild" class="inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="btn" type="submit"><?= $t('Rebuild now') ?></button></form>
+    <?php else: ?><?= $t('Ask an admin to rebuild it under Updates.') ?><?php endif ?></div>
 <?php endif ?>
 <?php if (!empty($flash)): ?><div class="notice notice-ok" role="status"><?= $e($flash) ?></div><?php endif ?>
 <?= $content ?>

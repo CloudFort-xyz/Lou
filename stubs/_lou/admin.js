@@ -5,6 +5,14 @@
   var csrf = body.dataset.csrf;
   var self = body.dataset.self;
 
+  // Translations for the admin language (I18n::JS in PHP); English is the key and the fallback.
+  var strings = {};
+  try { strings = JSON.parse(body.dataset.i18n || '{}'); } catch (e) { strings = {}; }
+  function t(text, vars) {
+    var s = strings[text] || text;
+    return s.replace(/\{([a-z_]+)\}/g, function (m, k) { return vars && k in vars ? vars[k] : m; });
+  }
+
   // A confirm on a single button (forms with several actions, such as a redirect row).
   document.querySelectorAll('button[data-confirm]').forEach(function (b) {
     b.addEventListener('click', function (e) { if (!window.confirm(b.dataset.confirm)) e.preventDefault(); });
@@ -21,7 +29,7 @@
       if (!button || button.disabled) return;
       setTimeout(function () {
         button.dataset.label = button.textContent;
-        button.textContent = 'Working…';
+        button.textContent = t('Working…');
         button.disabled = true;
         f.setAttribute('aria-busy', 'true');
       }, 0);
@@ -61,10 +69,10 @@
     var label = b.dataset.copyLabel || b.textContent;
     b.dataset.copyLabel = label;
     copyText('value' in src && src.tagName !== 'BUTTON' ? src.value : src.textContent).then(function () {
-      b.textContent = 'Copied';
+      b.textContent = t('Copied');
       b.classList.add('is-done');
     }, function () {
-      b.textContent = 'Press Ctrl+C';
+      b.textContent = t('Press Ctrl+C');
       if (src.select) src.select();
     }).then(function () {
       clearTimeout(b._t);
@@ -78,7 +86,7 @@
       var box = document.querySelector(b.dataset.foldAll);
       if (!box) return;
       var closed = box.querySelectorAll('details:not([open])').length;
-      b.textContent = closed ? 'Expand all' : 'Collapse all';
+      b.textContent = closed ? t('Expand all') : t('Collapse all');
     });
   }
   document.querySelectorAll('[data-fold-all]').forEach(function (b) {
@@ -99,14 +107,30 @@
   window.addEventListener('hashchange', openHash);
   openHash();
 
-  // Times are rendered in UTC; show them in the browser's time zone (UTC stays in the tooltip).
+  // Times without a chosen time zone are rendered in UTC: show them in the browser's time zone, in the
+  // user's date format (<body data-date data-time>, the PHP tokens Y m d H i g A). UTC stays in the tooltip.
+  // Times with data-fixed were already rendered in the time zone picked under Profile.
   var pad = function (n) { return (n < 10 ? '0' : '') + n; };
-  document.querySelectorAll('time[datetime]').forEach(function (t) {
-    var d = new Date(t.getAttribute('datetime'));
+  function format(d, pattern) {
+    return pattern.replace(/[YmdHigA]/g, function (c) {
+      switch (c) {
+        case 'Y': return d.getFullYear();
+        case 'm': return pad(d.getMonth() + 1);
+        case 'd': return pad(d.getDate());
+        case 'H': return pad(d.getHours());
+        case 'i': return pad(d.getMinutes());
+        case 'g': return d.getHours() % 12 || 12;
+        default: return d.getHours() < 12 ? 'AM' : 'PM';
+      }
+    });
+  }
+  var datePattern = body.dataset.date || 'Y-m-d';
+  var timePattern = body.dataset.time || 'H:i';
+  document.querySelectorAll('time[datetime]:not([data-fixed])').forEach(function (el) {
+    var d = new Date(el.getAttribute('datetime'));
     if (isNaN(d.getTime())) return;
-    var day = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-    t.title = t.textContent;
-    t.textContent = t.hasAttribute('data-date') ? day : day + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    el.title = el.textContent;
+    el.textContent = format(d, el.hasAttribute('data-date') ? datePattern : datePattern + ' ' + timePattern);
   });
 
   // small screens: the side menu opens from the top bar button
@@ -148,7 +172,7 @@
     return fetch(self + '?r=' + route, {
       method: 'POST', body: fd, credentials: 'same-origin',
       headers: { 'Accept': 'application/json', 'X-Lou-CSRF': csrf }
-    }).then(function (r) { return r.json().catch(function () { return { ok: false, message: 'Server error (' + r.status + ')' }; }); });
+    }).then(function (r) { return r.json().catch(function () { return { ok: false, message: t('Server error ({status})', { status: r.status }) }; }); });
   }
 
   function say(text, error) {
@@ -176,10 +200,10 @@
 
   function done(res, path) {
     if (res.ok) {
-      say(res.draft ? 'Saved to your draft.' : 'Saved.');
+      say(res.draft ? t('Saved to your draft.') : t('Saved.'));
       reloadPreview(path);
     } else {
-      say(res.message || 'Saving failed', true);
+      say(res.message || t('Saving failed'), true);
       reloadPreview();
     }
   }
@@ -188,7 +212,7 @@
   var metaForm = document.getElementById('meta-form');
   metaForm.addEventListener('submit', function (e) {
     e.preventDefault();
-    say('Saving…');
+    say(t('Saving…'));
     post('meta', new FormData(metaForm)).then(function (res) { done(res, res.path); });
   });
 
@@ -201,7 +225,7 @@
         if (metaForm.elements[k]) metaForm.elements[k].value = m[k] || '';
       });
       if (metaForm.elements.slug) metaForm.elements.slug.closest('label').hidden = m.special;
-      document.title = 'Edit: ' + m.title + ' · Lou';
+      document.title = t('Edit: {title}', { title: m.title }) + ' · Lou';
       document.querySelectorAll('.langs a').forEach(function (a) {
         var u = new URL(a.href);
         u.searchParams.set('page', state.page);
@@ -221,7 +245,7 @@
     var fd = new FormData(imageForm);
     fd.append('field', imageField);
     dialog.close();
-    say('Uploading…');
+    say(t('Uploading…'));
     post('image', fd).then(function (res) { done(res); imageForm.reset(); });
   });
 
@@ -235,7 +259,7 @@
         loadMeta();
       }
     } else if (m.lou === 'save') {
-      say('Saving…');
+      say(t('Saving…'));
       post('save', { field: m.field, type: m.type, value: m.value }).then(function (res) { done(res); });
     } else if (m.lou === 'image') {
       imageField = m.field;
@@ -254,16 +278,16 @@
     var box = document.getElementById('share-result');
     var field = document.getElementById('share-url');
     var note = document.getElementById('share-note');
-    note.textContent = 'Creating the link…';
+    note.textContent = t('Creating the link…');
     post('share', live ? { live: '1', path: path } : { days: 7 }).then(function (res) {
       if (res.ok) {
         field.value = res.url;
         box.hidden = false;
-        var valid = res.live ? 'Live viewer link, valid for a day' : 'Preview link, valid for ' + res.days + ' days';
+        var valid = res.live ? t('Live viewer link, valid for a day') : t('Preview link, valid for {days} days', { days: res.days });
         note.textContent = valid + '.';
-        copyText(res.url).then(function () { note.textContent = valid + ', copied to the clipboard.'; }, function () {});
+        copyText(res.url).then(function () { note.textContent = t('{text}, copied to the clipboard.', { text: valid }); }, function () {});
       } else {
-        note.textContent = res.message || 'Failed';
+        note.textContent = res.message || t('Failed');
       }
     });
   }

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="<?= $e($uiLang) ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,7 +7,7 @@
 <title><?= $e($title) ?> · Lou</title>
 <link rel="stylesheet" href="/_lou/admin.css">
 </head>
-<body class="full" data-csrf="<?= $e($csrf) ?>" data-self="<?= $e($self) ?>">
+<body class="full" data-csrf="<?= $e($csrf) ?>" data-self="<?= $e($self) ?>"<?php if ($t->js()): ?> data-i18n="<?= $e(json_encode($t->js(), JSON_UNESCAPED_UNICODE)) ?>"<?php endif ?>>
 <?= $content ?>
 <script src="/_lou/admin.js" defer></script>
 </body>
