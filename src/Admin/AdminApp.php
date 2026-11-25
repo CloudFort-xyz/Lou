@@ -75,6 +75,8 @@ final class AdminApp
         'GET assistants'      => 'admin',
         'POST token-add'      => 'admin',
         'POST token-revoke'   => 'admin',
+        'GET settings'        => 'admin',
+        'POST settings'       => 'admin',
     ];
 
     private Request $req;
@@ -389,7 +391,7 @@ final class AdminApp
             throw new LouException('Staging has problems:', $problems);
         }
         $p = (new Previews($this->app))->stable('staging', 'staging', $this->user());
-        $s->recordPreview(rtrim((string) $this->app->config['base_url'], '/') . Previews::urlPrefix($p['token']) . '/', $p['result']);
+        $s->recordPreview($this->app->siteUrl($this->req) . Previews::urlPrefix($p['token']) . '/', $p['result']);
         return Response::redirect(self::SELF . '?r=review');
     }
 
@@ -444,7 +446,7 @@ final class AdminApp
         $days = $live ? 1 : max(1, min(30, (int) ($this->req->input('days') ?: 7)));
         $token = (new Previews($this->app))->create($live ? 'live' : 'share', 'draft:' . $this->owner(), $days * 86400, $this->user());
         $this->db->audit('editor', $live ? 'live-preview' : 'share-preview', $token, $this->user());
-        $base = rtrim((string) $this->app->config['base_url'], '/');
+        $base = $this->app->siteUrl($this->req);
         $path = $this->req->input('path');
         $path = preg_match('#^/[a-z0-9/\-]*$#', $path) ? $path : '/';
         return Response::json(200, ['ok' => true, 'url' => $base . Previews::urlPrefix($token) . $path, 'days' => $days, 'live' => $live]);
@@ -512,6 +514,35 @@ final class AdminApp
     }
 
     // ---------------------------------------------------------------- builds, backups, redirects
+
+    private function rGetSettings(): Response
+    {
+        return $this->page('Settings', 'settings', [
+            'current'    => (string) $this->app->config['base_url'],
+            'configured' => $this->app->baseUrlConfigured(),
+            'suggested'  => $this->req->origin(),
+            'saved'      => isset($this->req->query['saved']),
+        ]);
+    }
+
+    private function rPostSettings(): Response
+    {
+        $url = rtrim(trim($this->req->input('base_url')), '/');
+        $p = parse_url($url);
+        if (!$p || !in_array($p['scheme'] ?? '', ['http', 'https'], true) || empty($p['host'])
+            || isset($p['user']) || isset($p['query']) || isset($p['fragment']) || ($p['path'] ?? '') !== '') {
+            throw new LouException('The site address must look like https://www.example.hu (no path)');
+        }
+        $file = $this->app->varDir . '/settings.json';
+        $settings = $this->app->settings();
+        $settings['base_url'] = strtolower($p['scheme'] . '://' . $p['host']) . (isset($p['port']) ? ':' . $p['port'] : '');
+        Fs::writeJson($file, $settings);
+        $this->db->audit('admin', 'settings', 'base_url ' . $settings['base_url'], $this->user());
+        // the sitemap, hreflang and canonical links are built from base_url
+        (new Builder(new App($this->app->root)))->build();
+        (new Previews($this->app))->rebuild();
+        return Response::redirect(self::SELF . '?r=settings&saved=1');
+    }
 
     private function rGetBuilds(): Response
     {
@@ -728,7 +759,8 @@ final class AdminApp
             'self'        => self::SELF,
             'route'       => (string) ($this->req->query['r'] ?? 'pages'),
             'siteName'    => $this->app->config['name'],
-            'baseUrl'     => (string) $this->app->config['base_url'],
+            'baseUrl'     => $this->app->siteUrl($this->req),
+            'baseUrlMissing' => !$this->app->baseUrlConfigured(),
             'unpublished' => $this->session->get('user') ? $this->unpublished() : false,
             'staged'      => $this->session->get('user') ? count(Workspace::staging($this->app)->changedFiles()) : 0,
             'drafted'     => $this->session->get('user') ? count($this->draft()->changedFiles()) : 0,

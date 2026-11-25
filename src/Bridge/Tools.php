@@ -23,6 +23,7 @@ final class Tools
         private readonly App $app,
         private readonly Database $db,
         private readonly string $caller,
+        private readonly string $siteUrl = '',
     ) {
     }
 
@@ -112,7 +113,7 @@ final class Tools
             return ['ok' => false, 'problems' => $problems];
         }
         $p = (new Previews($this->app))->stable('draft', 'draft:' . $this->caller, $this->caller);
-        $url = rtrim((string) $this->app->config['base_url'], '/') . Previews::urlPrefix($p['token']) . '/';
+        $url = ($this->siteUrl ?: $this->app->siteUrl()) . Previews::urlPrefix($p['token']) . '/';
         if ($s->exists()) {
             $s->recordPreview($url, $p['result']);
         }
@@ -154,7 +155,7 @@ final class Tools
         $previews = new Previews($this->app);
         $previews->revokeSource('draft:' . $this->caller);
         $previews->rebuild();
-        $base = rtrim((string) $this->app->config['base_url'], '/');
+        $base = $this->siteUrl ?: $this->app->siteUrl();
         return ['ok' => true, 'submitted' => $files, 'review_url' => $base . '/_lou/admin.php?r=review',
             'note' => 'Your changes are on staging. Ask the user to open the review page, check the preview and publish.'];
     }

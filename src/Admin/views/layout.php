@@ -23,6 +23,7 @@
       <a href="<?= $self ?>?r=redirects"<?= $route === 'redirects' ? ' aria-current="page"' : '' ?>>Redirects</a>
       <a href="<?= $self ?>?r=builds"<?= $route === 'builds' ? ' aria-current="page"' : '' ?>>Builds</a>
       <a href="<?= $self ?>?r=backups"<?= $route === 'backups' ? ' aria-current="page"' : '' ?>>Backups</a>
+      <a href="<?= $self ?>?r=settings"<?= $route === 'settings' ? ' aria-current="page"' : '' ?>>Settings</a>
     <?php endif ?>
   </nav>
   <form method="post" action="<?= $self ?>?r=logout" class="inline">
@@ -32,6 +33,10 @@
 </header>
 <?php endif ?>
 <main class="wrap">
+<?php if (!empty($user) && !empty($baseUrlMissing) && $route !== 'settings'): ?>
+  <div class="alert alert-error"><strong>The site address is not set.</strong> The sitemap, search engine links and the bridge URL need it.
+    <?php if ($role === 'admin'): ?><a href="<?= $self ?>?r=settings">Set it in Settings</a>.<?php else: ?>Ask an admin to set it under Settings.<?php endif ?></div>
+<?php endif ?>
 <?= $content ?>
 </main>
 <script src="/_lou/admin.js" defer></script>

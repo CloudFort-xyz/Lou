@@ -46,14 +46,17 @@ test('check: missing required extension or old PHP fails, missing recommended on
     check(check_item($soft, 'memory_limit')['level'] === Requirements::WARN, 'low memory warns');
 });
 
-test('check: install warnings for example base_url, missing .env.php and log mail; symlinked output fails', function () {
+test('check: example base_url fails; install warnings for missing .env.php and log mail; symlinked output fails', function () {
     $root = install();
     $r = (new Requirements($root, fn () => true, fn () => true))->run();
-    check(Requirements::passed($r), 'example install passes with warnings');
-    foreach (['base_url', '.env.php', 'mail'] as $label) {
+    check(check_item($r, 'base_url')['level'] === Requirements::FAIL, 'the example base_url fails loudly');
+    foreach (['.env.php', 'mail'] as $label) {
         check(check_item($r, $label)['level'] === Requirements::WARN, "$label should warn");
     }
     check(check_item($r, 'output folder')['level'] === Requirements::OK, 'output folder ok');
+    Fs::writeJson("$root/var/settings.json", ['base_url' => 'https://lou.cloudfort.xyz']);
+    $r = (new Requirements($root, fn () => true, fn () => true))->run();
+    check(Requirements::passed($r) && check_item($r, 'base_url') === null, 'a base_url set in the admin passes');
 
     $elsewhere = temp_dir();
     symlink($elsewhere, "$root/public");

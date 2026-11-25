@@ -34,7 +34,7 @@ function admin_req(string $method, string $route, array $post = [], array $extra
     if ($method === 'POST' && !array_key_exists('_csrf', $post) && !isset($extra['nocsrf'])) {
         $post['_csrf'] = 'tok';
     }
-    return new Request($method, ['r' => $route] + ($extra['query'] ?? []), $post, $headers, '203.0.113.9', 0, $files);
+    return new Request($method, ['r' => $route] + ($extra['query'] ?? []), $post, $headers, '203.0.113.9', 0, $files, https: true);
 }
 
 /** Where a user's draft lives (edits land there, not in site/). */
@@ -252,4 +252,34 @@ test('admin: web server policy for admin.php matches the admin policy, so previe
     contains($htaccess, '<Files "admin.php">');
     contains($htaccess, 'Header always set Content-Security-Policy "' . AdminApp::CSP . '"');
     contains(AdminApp::CSP, "frame-src 'self'");
+});
+
+test('admin: with the example base_url, links Lou hands out use the request host, and a banner says so', function () {
+    [$admin, , $app] = admin_setup();
+    check(!$app->baseUrlConfigured(), 'example.com is not configured');
+    $r = $admin->handle(admin_req('POST', 'share', ['path' => '/'], ['headers' => ['host' => 'lou.cloudfort.xyz']]));
+    $share = json_decode($r->body, true);
+    check(str_starts_with($share['url'], 'https://lou.cloudfort.xyz/_lou/p/'), $r->body);
+    $page = $admin->handle(admin_req('GET', 'pages', [], ['headers' => ['accept' => 'text/html']]));
+    contains($page->body, 'The site address is not set');
+    contains($page->body, '?r=settings');
+    check(App::class && (new Lou\Http\Request('GET', headers: ['host' => 'evil.test/x']))->origin() === '', 'malformed host is ignored');
+});
+
+test('admin: settings saves base_url, rebuilds the sitemap with it, and is admin-only', function () {
+    [$admin, $session, $app, $db] = admin_setup();
+    $r = $admin->handle(admin_req('POST', 'settings', ['base_url' => 'not a url']));
+    check($r->status >= 400, 'invalid address rejected');
+    $r = $admin->handle(admin_req('POST', 'settings', ['base_url' => 'https://lou.cloudfort.xyz/']));
+    check($r->status === 303, $r->body);
+    check(Fs::readJson($app->varDir . '/settings.json') === ['base_url' => 'https://lou.cloudfort.xyz'], 'saved without trailing slash');
+    $fresh = new App($app->root);
+    check($fresh->baseUrlConfigured() && $fresh->config['base_url'] === 'https://lou.cloudfort.xyz', 'overrides site/config.php');
+    contains(file_get_contents($fresh->outputDir() . '/sitemap.xml'), 'https://lou.cloudfort.xyz/');
+    $page = (new AdminApp($fresh, $db, $session))->handle(admin_req('GET', 'pages', [], ['headers' => ['accept' => 'text/html']]));
+    check(!str_contains($page->body, 'The site address is not set'), 'banner gone on the next request');
+
+    [$editor] = admin_setup('editor');
+    $r = $editor->handle(admin_req('POST', 'settings', ['base_url' => 'https://x.hu']));
+    check($r->status === 403, "editor got {$r->status}");
 });

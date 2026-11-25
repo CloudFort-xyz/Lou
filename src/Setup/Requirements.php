@@ -139,8 +139,10 @@ final class Requirements
         }
 
         $base = (string) $app->config['base_url'];
-        if ($base === '' || str_contains($base, 'example.com')) {
-            $r[] = $this->item(self::WARN, 'base_url', "set 'base_url' in site/config.php to the real https:// address (sitemap, hreflang, bridge URL)");
+        if ($base === '') {
+            $r[] = $this->item(self::WARN, 'base_url', "not set: set the real https:// address in Admin → Settings or site/config.php (sitemap, hreflang, bridge URL)");
+        } elseif (!$app->baseUrlConfigured()) {
+            $r[] = $this->item(self::FAIL, 'base_url', "still the example ($base): set the real https:// address in Admin → Settings (or site/config.php, then php lou build)");
         }
         if (!is_file($app->envFile())) {
             $r[] = $this->item(self::WARN, '.env.php', 'missing: copy .env.example.php to .env.php for SMTP and API keys');

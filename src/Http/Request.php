@@ -21,6 +21,7 @@ final class Request
         public readonly int $contentLength = 0,
         public readonly array $files = [],
         public readonly string $body = '',
+        public readonly bool $https = false,
     ) {
     }
 
@@ -45,7 +46,20 @@ final class Request
             files: $_FILES,
             // raw body only for JSON requests (MCP / REST); form posts arrive in $_POST
             body: str_contains((string) ($_SERVER['CONTENT_TYPE'] ?? ''), 'json') ? (string) file_get_contents('php://input', false, null, 0, 8 * 1024 * 1024) : '',
+            https: in_array(strtolower((string) ($_SERVER['HTTPS'] ?? '')), ['on', '1'], true)
+                || (string) ($_SERVER['SERVER_PORT'] ?? '') === '443'
+                || strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https',
         );
+    }
+
+    /** scheme://host[:port] this request was made to, or '' when the Host header is missing or malformed. */
+    public function origin(): string
+    {
+        $host = strtolower($this->header('host'));
+        if (!preg_match('/^[a-z0-9.\-]+(:\d{1,5})?$/', $host)) {
+            return '';
+        }
+        return ($this->https ? 'https://' : 'http://') . $host;
     }
 
     public function header(string $name): string
