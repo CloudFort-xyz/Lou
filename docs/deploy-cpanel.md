@@ -85,7 +85,7 @@ kner.hu-lou/
   .cpanel.yml
 ```
 
-Clone it recursively (`git clone --recurse-submodules …`, or tick nothing extra in cPanel and run `git submodule update --init` once in the clone), and deploy with `--site` so the first deploy seeds the install from the client's `site/` rather than Lou's example site:
+cPanel clones without submodules, so run `git submodule update --init` once in the clone (or clone with `git clone --recurse-submodules` over SSH). Deploy with `--site` so the first deploy seeds the install from the client's `site/` rather than Lou's example site:
 
 ```sh
 php ~/repositories/kner.hu-lou/lou/lou deploy ~/domains/kner.hu --site=$HOME/repositories/kner.hu-lou/site
