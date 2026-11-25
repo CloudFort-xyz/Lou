@@ -158,3 +158,16 @@ test('review: an assistant submitting gets the preview link back', function () {
     check(str_contains((string) $r['preview_url'], '/_lou/p/'), json_encode($r));
     check(Workspace::staging($app)->lastPreview() !== null, 'Review has it too');
 });
+
+test('design import: content edited on the server is never touched, and a first import keeps server-only files', function () {
+    [$admin, , $app] = admin_setup();
+    $site = $app->siteDir;
+    $zip = client_zip($site, ['assets/css/site.css' => "x{}\n", 'content/pages/about/hu.json' => '{"title":"repo"}', 'menu.json' => '["home"]']);
+    editJson("$site/content/pages/about/hu.json", function ($d) { $d['title'] = 'Szerver'; return $d; });
+    Fs::write("$site/assets/css/extra.css", 'y{}');   // added on the server, not in the zip
+    $r = (new Lou\Setup\DesignImport($app))->toDraft($zip, Workspace::draft($app, 'user:bence'));
+    check($r['first'] && $r['deleted'] === [] && in_array('assets/css/site.css', $r['written'], true), json_encode($r));
+    check(Workspace::draft($app, 'user:bence')->changedFiles() === ['assets/css/site.css'], 'only the design file: ' . implode(',', Workspace::draft($app, 'user:bence')->changedFiles()));
+    check(is_file(draft_site($app) . '/assets/css/extra.css'), 'server-only file kept');
+    check(Fs::readJson(draft_site($app) . '/content/pages/about/hu.json')['title'] === 'Szerver', 'server content kept');
+});

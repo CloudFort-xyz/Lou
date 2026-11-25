@@ -42,8 +42,8 @@
     </details>
   <?php endif ?>
 
-  <details class="fold" id="design" open><summary><h2><?= $t('Site design from a zip') ?></h2></summary>
-  <p><?= $t('Upload a new version of the site\'s look: its templates, styles, scripts and design images. Texts, menus, settings and uploaded photos stay as they are. Nothing goes live until you have checked a preview and published it.') ?></p>
+  <details class="fold" id="design"><summary><h2><?= $t('Design update from a zip') ?></h2> <small class="muted"><?= $t('templates, styles and design images only') ?></small></summary>
+  <p><?= $t('<strong>Design only:</strong> the site\'s templates, styles, scripts and design images are updated from the zip. Page texts, menus, settings and uploaded photos on this server are never changed, even if the zip contains them. Nothing goes live until you have checked a preview and published it.') ?></p>
   <form method="post" action="<?= $self ?>?r=design-upload" enctype="multipart/form-data" class="stack">
     <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
     <label><?= $t('Site zip') ?> <input type="file" name="site" accept=".zip" required></label>
