@@ -16,7 +16,10 @@ $sel = static fn (string $a, string $b): string => $a === $b ? ' selected' : '';
     <label>Site address
       <input type="url" name="base_url" value="<?= $e($value) ?>" required placeholder="https://www.example.hu" pattern="https?://[^/?#]+/?">
     </label>
-    <p class="muted">The public address of this site, without a path. It is used for the sitemap, canonical and language links, preview and share links, and the assistant bridge URL. Saving rebuilds the live site. It overrides <code>base_url</code> in <code>site/config.php</code>.</p>
+    <p class="muted">The address visitors type to reach the site, such as https://www.example.hu. Saving rebuilds the live site.</p>
+    <details class="fold fold-small"><summary>Technical details</summary>
+      <p class="muted">Used for the sitemap, canonical and hreflang links, preview and share links, and the assistant bridge URL. No path. It overrides <code>base_url</code> in <code>site/config.php</code>.</p>
+    </details>
     <p><button class="btn btn-primary" type="submit">Save address</button></p>
   </form>
 </section>
@@ -43,7 +46,7 @@ $sel = static fn (string $a, string $b): string => $a === $b ? ' selected' : '';
     </div>
     <p class="muted">Use an address on your own domain that the SMTP account is allowed to send from, or mail may land in spam. Visitors' addresses are set as Reply-To.</p>
 
-    <h3>SMTP server</h3>
+    <details class="fold"<?= $smtp['host'] === '' || $mail['transport'] === 'log' ? ' open' : '' ?>><summary><h3>SMTP server</h3><?php if ($smtp['host'] !== ''): ?> <small class="muted"><?= $e($smtp['host']) ?>:<?= (int) $smtp['port'] ?></small><?php endif ?></summary>
     <?php if ($smtpSource === 'env'): ?><p class="muted">Currently read from <code>.env.php</code>. Saving here stores the values in the admin instead, and they take over.</p><?php endif ?>
     <div class="cols">
       <label>Server <input name="host" value="<?= $e($smtp['host']) ?>" maxlength="253" placeholder="mail.example.hu" autocapitalize="off" spellcheck="false"></label>
@@ -63,7 +66,11 @@ $sel = static fn (string $a, string $b): string => $a === $b ? ' selected' : '';
       </label>
     </div>
     <?php if ($smtp['hasPass']): ?><label class="check"><input type="checkbox" name="clear_pass" value="1"> Remove the saved password</label><?php endif ?>
-    <p class="muted">The password is never shown again. It is stored outside the web root in <code>var/secrets.json</code>, readable only by the site's own user, and it is not included in backups.</p>
+    <p class="muted">The password is never shown again and is not included in backups.</p>
+    <details class="fold fold-small"><summary>Where is it stored?</summary>
+      <p class="muted">Outside the web root in <code>var/secrets.json</code>, readable only by the site's own user (mode 0600).</p>
+    </details>
+    </details>
     <p><button class="btn btn-primary" type="submit">Save email settings</button></p>
   </form>
 

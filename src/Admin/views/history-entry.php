@@ -22,6 +22,8 @@ $who = static fn (string $owner): string => preg_replace('/^(user|llm):/', '', $
     <button class="btn" type="submit">Restore this version (into my draft)</button>
   </form>
 </div>
+<?php if (count($diffs) > 1): ?><div class="fold-head"><h2><?= count($diffs) ?> changed files</h2><button class="btn btn-link" type="button" data-fold-all="#entry-diffs">Collapse all</button></div><?php endif ?>
+<div id="entry-diffs">
 <?php foreach ($diffs as $path => $diff): ?>
   <details class="diff" open>
     <summary><code><?= $e($path) ?></code> <span class="badge"><?= $e($entry['files'][$path]) ?></span>
@@ -38,3 +40,4 @@ $who = static fn (string $owner): string => preg_replace('/^(user|llm):/', '', $
     </form>
   </details>
 <?php endforeach ?>
+</div>

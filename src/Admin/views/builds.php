@@ -8,15 +8,15 @@ $builtAt = static function (string $name) use ($time): string {
 };
 ?>
 <h1>Builds</h1>
-<?php if ($live): ?><p>Live build: <code><?= $e($live['build']) ?></code>, published <?= $time($live['at']) ?>.</p><?php endif ?>
+<?php if ($live): ?><p>The live site was published <?= $time($live['at']) ?>. <small class="muted">Build <code><?= $e($live['build']) ?></code></small></p><?php endif ?>
 <h2>Previous builds</h2>
 <p class="muted">The live site as it was before each publish. Rolling back only swaps the live files: your content is unchanged, and the next publish builds from it again.</p>
 <?php if (!$builds): ?><p class="muted">None yet. One is kept each time the site is published.</p><?php else: ?>
 <table class="table list">
-  <thead><tr><th>Replaced at</th><th>Build</th><th><span class="sr">Actions</span></th></tr></thead>
+  <thead><tr><th>Live until</th><th><span class="sr">Actions</span></th></tr></thead>
   <tbody>
   <?php foreach ($builds as $b): ?>
-    <tr><td><?= $builtAt($b) ?></td><td><code><?= $e($b) ?></code></td><td class="cell-actions">
+    <tr><td><?= $builtAt($b) ?> <small class="muted">build <code><?= $e(substr($b, 7)) ?></code></small></td><td class="cell-actions">
       <form method="post" action="<?= $self ?>?r=rollback" data-confirm="Put this build back on the live site?">
         <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
         <input type="hidden" name="build" value="<?= $e($b) ?>">

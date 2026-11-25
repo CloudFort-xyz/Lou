@@ -11,7 +11,7 @@
         <?php endif ?>
       <?php endforeach ?>
     </div>
-    <h2>Page settings</h2>
+    <details class="fold fold-panel" open><summary><h2>Page settings</h2></summary>
     <form id="meta-form" class="stack">
       <label>Title <input name="title" maxlength="200" value="<?= $e($page->title) ?>"></label>
       <label>Menu label <input name="menu_label" maxlength="80" value="<?= $e($page->data['menu_label'] ?? '') ?>"></label>
@@ -23,9 +23,11 @@
       <?php endif ?>
       <button class="btn" type="submit">Save settings</button>
     </form>
+    </details>
     <h2>Your draft</h2>
     <p id="status" class="muted" role="status" aria-live="polite"><?= $drafted ? 'Your changes are saved in your draft. Nobody else sees them until you submit.' : 'No changes yet. Edits are saved to your own draft.' ?></p>
     <p><a class="btn btn-primary" href="<?= $self ?>?r=review">Review and submit</a></p>
+    <details class="fold fold-panel" id="share-box"><summary><h2>Show it to someone</h2></summary>
     <p><button class="btn btn-link" type="button" id="share">Create a shareable preview link</button><br>
       <button class="btn btn-link" type="button" id="share-live">Create a live viewer link</button>
       <small class="muted">The client sees your changes appear as you save them. Valid for a day.</small></p>
@@ -34,8 +36,10 @@
       <button class="btn" type="button" data-copy="share-url">Copy</button>
     </div>
     <p id="share-note" class="muted" role="status" aria-live="polite"></p>
-    <h2>How to edit</h2>
+    </details>
+    <details class="fold fold-panel"><summary><h2>How to edit</h2></summary>
     <p class="muted">Click any highlighted text in the preview to edit it, then click outside to save. Click an image to replace it or change its description.</p>
+    </details>
   </aside>
   <iframe class="preview" id="preview" src="<?= $e($preview) ?>" title="Page preview"></iframe>
 </div>
