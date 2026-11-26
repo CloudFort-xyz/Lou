@@ -682,13 +682,14 @@ final class AdminApp
         $applied = null;
         $safety = null;
         $meta = null;
+        $entry = null;
+        $history = new History($this->app);
         if ($s->exists()) {
             $meta = $s->meta();
             if ($this->req->input('rev') !== (string) $meta['rev']) {
                 throw new LouException($this->tr('Staging changed while you were reviewing it. Review it again.'));
             }
             $safety = basename((new Backup($this->app))->create(null, null, 30));
-            $history = new History($this->app);
             $entry = $history->record($s->changes(), $s->siteDir(), (string) $this->user(), $meta['submissions']);
             try {
                 $applied = $s->apply($this->req->input('force') === '1');
@@ -701,6 +702,9 @@ final class AdminApp
             }
         }
         $result = (new Builder($this->app))->build();
+        if ($entry !== null) {
+            $history->annotate($entry, ['build' => $result['id']]);
+        }
         $previews = new Previews($this->app);
         $previews->revokeSource('staging');
         $previews->rebuild();
