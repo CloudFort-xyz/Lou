@@ -24,7 +24,7 @@
   <details class="diff" open>
     <summary><code><?= $e($path) ?></code> <span class="badge"><?= $t($entry['files'][$path]) ?></span>
       <a href="<?= $self ?>?r=history&amp;file=<?= $e(rawurlencode($path)) ?>"><?= $t('file history') ?></a></summary>
-    <pre><?php foreach (explode("\n", rtrim($diff, "\n")) as $line):
+    <pre class="diff-lines"><?php foreach (explode("\n", rtrim($diff, "\n")) as $line):
       $c = match ($line[0] ?? ' ') { '+' => 'add', '-' => 'del', '@' => 'hunk', default => '' };
       ?><span class="<?= $c ?>"><?= $e($line) ?></span><?php endforeach ?></pre>
     <form method="post" action="<?= $self ?>?r=history-restore" class="inline">

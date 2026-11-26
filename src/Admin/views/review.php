@@ -19,9 +19,29 @@ foreach ($open ? $meta['submissions'] : [] as $sub) {
     }
 }
 
-/** One change list, grouped. $where: 'draft' (Undo = revert in my draft) or 'staging' (Undo = take it off staging). */
+/** A unified diff as coloured lines (hunk headers, additions, removals). */
+$diffPre = static function (string $diff) use ($e): void { ?>
+  <pre class="diff-lines"><?php foreach (explode("\n", rtrim($diff, "\n")) as $line):
+    $c = match ($line[0] ?? ' ') { '+' => 'add', '-' => 'del', '@' => 'hunk', default => '' };
+    ?><span class="<?= $c ?>"><?= $e($line) ?></span><?php endforeach ?></pre>
+<?php };
+
+/** One changed field: old → new, or a word diff for long text. */
+$field = static function (array $f) use ($e, $t): void { ?>
+  <li><span class="field-name"><?= $e($f['name']) ?></span>
+    <span class="field-value"><?php if ($f['diff']):
+        foreach ($f['diff'] as [$op, $text]): ?><?= match ($op) { '-' => '<del>' . $e($text) . '</del>', '+' => '<ins>' . $e($text) . '</ins>', default => $e($text) } ?><?php endforeach;
+      elseif ($f['old'] === null): ?><ins><?= $e($f['new']) ?></ins><?php
+      elseif ($f['new'] === null): ?><del><?= $e($f['old']) ?></del> <small class="muted"><?= $t('(removed)') ?></small><?php
+      else: ?><del><?= $e($f['old']) ?></del> → <ins><?= $e($f['new']) ?></ins><?php endif ?></span></li>
+<?php };
+
+/**
+ * One change list, grouped. $where: 'draft' (Undo = revert in my draft) or 'staging' (Undo = take it off staging).
+ * Each change says what changed in a line; the details unfold under it (the rest of the fields, or the line diff of a template).
+ */
 $views ??= [];
-$changes = static function (array $list, string $where) use ($e, $t, $self, $csrf, $by, $views): void { ?>
+$changes = static function (array $list, string $where, array $diffs) use ($e, $t, $self, $csrf, $by, $views, $field, $diffPre): void { ?>
   <?php foreach (ChangeList::grouped($list) as $group => $groupItems): ?>
     <h4 class="change-group"><?= $t(ChangeList::GROUPS[$group]) ?></h4>
     <ul class="changes">
@@ -48,18 +68,29 @@ $changes = static function (array $list, string $where) use ($e, $t, $self, $csr
         </div>
         <?php if ($it['fields']): ?>
           <ul class="fields">
-          <?php foreach ($it['fields'] as $f): ?>
-            <li><span class="field-name"><?= $e($f['name']) ?></span>
-              <span class="field-value"><?php if ($f['diff']):
-                  foreach ($f['diff'] as [$op, $text]): ?><?= match ($op) { '-' => '<del>' . $e($text) . '</del>', '+' => '<ins>' . $e($text) . '</ins>', default => $e($text) } ?><?php endforeach;
-                elseif ($f['old'] === null): ?><ins><?= $e($f['new']) ?></ins><?php
-                elseif ($f['new'] === null): ?><del><?= $e($f['old']) ?></del> <small class="muted"><?= $t('(removed)') ?></small><?php
-                else: ?><del><?= $e($f['old']) ?></del> → <ins><?= $e($f['new']) ?></ins><?php endif ?></span></li>
-          <?php endforeach ?>
-          <?php if ($it['more']): ?><li class="muted"><?= $t('and {n} more (see Technical details)', ['n' => $it['more']]) ?></li><?php endif ?>
+          <?php foreach ($it['fields'] as $f) $field($f) ?>
           </ul>
-        <?php elseif ($it['lines']): ?>
-          <p class="change-note muted"><?= $t('{added} added, {removed} removed', ['added' => $t->plain('{n} line|{n} lines', ['n' => $it['lines'][0]]), 'removed' => (int) $it['lines'][1]]) ?></p>
+          <?php if ($it['rest']): ?>
+            <details class="fold fold-small change-more">
+              <summary><?= $t('Show {n} more', ['n' => count($it['rest'])]) ?></summary>
+              <ul class="fields"><?php foreach ($it['rest'] as $f) $field($f) ?></ul>
+            </details>
+          <?php endif ?>
+        <?php elseif ($it['lines']):
+          [$added, $removed] = $it['lines'];
+          $note = match (true) {
+              $it['kind'] === 'added' || !$removed => $t('{lines} added', ['lines' => $t->plain('{n} line|{n} lines', ['n' => $added])]),
+              $it['kind'] === 'deleted' || !$added => $t('{lines} removed', ['lines' => $t->plain('{n} line|{n} lines', ['n' => $removed])]),
+              default => $t('{added} added, {removed} removed', ['added' => $t->plain('{n} line|{n} lines', ['n' => $added]), 'removed' => (int) $removed]),
+          }; ?>
+          <?php if (isset($diffs[$it['path']])): ?>
+            <details class="fold fold-small change-diff">
+              <summary title="<?= $t('Show the changed lines') ?>"><?= $note ?></summary>
+              <?php $diffPre($diffs[$it['path']]) ?>
+            </details>
+          <?php else: ?>
+            <p class="change-note muted"><?= $note ?></p>
+          <?php endif ?>
         <?php endif ?>
       </li>
     <?php endforeach ?>
@@ -67,15 +98,23 @@ $changes = static function (array $list, string $where) use ($e, $t, $self, $csr
   <?php endforeach;
 };
 
+/** "Expand all" for a change list that has something to unfold. */
+$expandAll = static function (array $list, array $diffs, string $box) use ($t): void {
+    foreach ($list as $it) {
+        if ($it['rest'] || ($it['lines'] && isset($diffs[$it['path']]))) { ?>
+          <button class="btn btn-link fold-tools" type="button" data-fold-all="<?= $box ?>"><?= $t('Expand all') ?></button>
+        <?php return;
+        }
+    }
+};
+
 /** Code diffs of the given files, folded. */
-$diffList = static function (array $list, array $diffs) use ($e, $t): void {
+$diffList = static function (array $list, array $diffs) use ($e, $t, $diffPre): void {
     foreach ($list as $it):
         if (!isset($diffs[$it['path']])) continue; ?>
       <details class="diff">
         <summary><code><?= $e($it['path']) ?></code> <span class="badge<?= $it['kind'] === 'deleted' ? ' badge-warn' : '' ?>"><?= $t($it['kind']) ?></span></summary>
-        <pre><?php foreach (explode("\n", rtrim($diffs[$it['path']], "\n")) as $line):
-          $c = match ($line[0] ?? ' ') { '+' => 'add', '-' => 'del', '@' => 'hunk', default => '' };
-          ?><span class="<?= $c ?>"><?= $e($line) ?></span><?php endforeach ?></pre>
+        <?php $diffPre($diffs[$it['path']]) ?>
       </details>
     <?php endforeach;
 };
@@ -108,7 +147,8 @@ $diffList = static function (array $list, array $diffs) use ($e, $t): void {
     <h2><?= $t('Your draft') ?></h2>
     <p class="muted"><?= $t('Only you see these until you submit them. Undo takes back one change.') ?></p>
     <?php if ($mine['conflicts']): ?><p class="alert alert-error"><?= $t('Someone else changed some of the same things on staging meanwhile. You\'ll be asked what to do when you submit.') ?></p><?php endif ?>
-    <?php $changes($mine['items'], 'draft') ?>
+    <?php $expandAll($mine['items'], $mine['diffs'], '#draft-changes') ?>
+    <div id="draft-changes"><?php $changes($mine['items'], 'draft', $mine['diffs']) ?></div>
     <form method="post" action="<?= $self ?>?r=submit" class="stack review-submit">
       <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
       <label><?= $t('What did you change?') ?> <small class="muted"><?= $t('(optional, shown to the reviewer and kept in the history)') ?></small>
@@ -182,8 +222,8 @@ $diffList = static function (array $list, array $diffs) use ($e, $t): void {
         </ul></div>
     <?php endif ?>
 
-    <h3><?= $t('What changes') ?></h3>
-    <?php $changes($items, 'staging') ?>
+    <div class="fold-head"><h3><?= $t('What changes') ?></h3><?php $expandAll($items, $diffs, '#staging-changes') ?></div>
+    <div id="staging-changes"><?php $changes($items, 'staging', $diffs) ?></div>
 
     <div class="decision">
       <form method="post" action="<?= $self ?>?r=publish" class="inline" data-confirm="<?= $t('Publish {changes} to the live site?', ['changes' => $changesN($nStaged)]) ?>">

@@ -50,7 +50,9 @@ final class ChangeList
     /**
      * @param array<string, string> $diffs path => unified diff, when already computed (Workspace::diffs())
      * @return list<array{path: string, kind: string, group: string, label: string, fields: list<array{name: string, old: ?string, new: ?string, diff: ?list<array{0: string, 1: string}>}>,
-     *                    more: int, lines: ?array{0: int, 1: int}, page: ?array{id: string, lang: string}}>
+     *                    more: int, rest: list<array>, lines: ?array{0: int, 1: int}, page: ?array{id: string, lang: string}}>
+     * `fields` are the first FIELDS_SHOWN changed fields, `rest` the others (`more` counts them). `lines` (added, removed)
+     * is set for code and other text files whose unified diff is known, so the Review screen can unfold that diff.
      */
     public static function of(Workspace $w, ?array $diffs = null, ?\Closure $tr = null): array
     {
@@ -83,7 +85,7 @@ final class ChangeList
     public static function item(string $path, string $kind, ?string $old, ?string $new, ?string $diff = null, ?\Closure $tr = null): array
     {
         $item = ['path' => $path, 'kind' => $kind, 'group' => self::group($path), 'label' => self::label($path, $new ?? $old, $tr),
-            'fields' => [], 'more' => 0, 'lines' => null,
+            'fields' => [], 'more' => 0, 'rest' => [], 'lines' => null,
             'page' => preg_match('#^content/pages/([^/]+)/([a-z]{2})\.json$#', $path, $m) ? ['id' => $m[1], 'lang' => $m[2]] : null];
         if (PathPolicy::isBinary($path)) {
             return $item;
@@ -94,11 +96,14 @@ final class ChangeList
             if (is_array($a) && is_array($b)) {
                 $fields = self::fieldChanges($a, $b, str_starts_with($path, 'content/pages/'), $tr);
                 $item['fields'] = array_slice($fields, 0, self::FIELDS_SHOWN);
-                $item['more'] = max(0, count($fields) - self::FIELDS_SHOWN);
+                $item['rest'] = array_slice($fields, self::FIELDS_SHOWN);
+                $item['more'] = count($item['rest']);
                 return $item;
             }
         }
-        if ($kind === 'changed' && $diff !== null) {
+        // A new or removed page / text file is described by its label alone: its raw JSON is not for the client.
+        $content = str_starts_with($path, 'content/') || $path === 'menu.json';
+        if ($diff !== null && ($kind === 'changed' || !$content)) {
             $add = $del = 0;
             foreach (explode("\n", $diff) as $line) {
                 $add += (int) str_starts_with($line, '+');
