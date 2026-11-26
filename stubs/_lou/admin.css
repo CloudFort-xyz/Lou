@@ -100,7 +100,7 @@ blockquote{margin:.5rem 0;padding:.5rem .9rem;border-left:3px solid var(--line);
 .diff summary{cursor:pointer;padding:.45rem .75rem}
 .diff pre,pre.code{margin:0;padding:.6rem .75rem;overflow:auto;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#f6f7f9;border:1px solid var(--line)}
 .diff pre{border:0;border-top:1px solid var(--line)}
-.diff pre span{display:block;white-space:pre}.diff .add{background:var(--ok-bg)}.diff .del{background:var(--err-bg)}.diff .hunk{color:var(--muted)}
+.diff-lines span{display:block;white-space:pre}.diff-lines .add{background:var(--ok-bg)}.diff-lines .del{background:var(--err-bg)}.diff-lines .hunk{color:var(--muted)}
 
 /* dashboard */
 .widgets{display:grid;grid-template-columns:repeat(auto-fill,minmax(22rem,1fr));gap:1.2rem;margin-bottom:1.2rem;align-items:start}
@@ -220,6 +220,9 @@ time{white-space:nowrap}
 .change-actions a{text-decoration:none}.change-actions a:hover{text-decoration:underline}
 button.link{background:none;border:0;padding:0;font:inherit;color:var(--accent);cursor:pointer}button.link:hover{text-decoration:underline}
 .change-note{margin:.15rem 0 0;font-size:13px}
+.change-diff>pre.diff-lines{margin:.3rem 0 .2rem;padding:.5rem .65rem;max-height:26rem;overflow:auto;font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#f6f7f9;border:1px solid var(--line);border-radius:var(--radius)}
+.change-diff .diff-lines span{white-space:pre-wrap;overflow-wrap:anywhere}
+.change-more>.fields{margin-top:.2rem}
 .fields{list-style:none;margin:.3rem 0 0;padding:0;display:grid;gap:.25rem;font-size:13px}
 .fields li{display:grid;grid-template-columns:minmax(7rem,12rem) 1fr;gap:.8rem}
 .field-name{color:var(--muted)}
@@ -234,7 +237,7 @@ ins{background:var(--ok-bg);color:#05603a;text-decoration:none;box-shadow:inset 
 .tech>summary{cursor:pointer;color:var(--muted);font-size:13px}
 .tech[open]>summary{margin-bottom:.4rem}
 .tech h4{margin:.8rem 0 .3rem;font-size:13px}
-.tech .diff pre span{white-space:pre-wrap;overflow-wrap:anywhere}
+.tech .diff-lines span{white-space:pre-wrap;overflow-wrap:anywhere}
 .review-submit{margin-top:1rem}
 .review-empty p{margin:0 0 .6rem}
 @media(max-width:50rem){

@@ -55,6 +55,13 @@ test('review: changes are described in plain words, with field changes and a sho
 
     $css = ChangeList::item('assets/css/site.css', 'changed', "a{}\n", "a{}\nb{}\n", "@@ -1 +1 @@\n a{}\n+b{}\n");
     check($css['group'] === 'design' && $css['label'] === 'Stylesheet: site.css' && $css['lines'] === [1, 0], json_encode($css));
+    $tpl = ChangeList::item('templates/new.php', 'added', null, "<p>a</p>\n<p>b</p>\n", "@@ -1 +1 @@\n+<p>a</p>\n+<p>b</p>\n");
+    check($tpl['lines'] === [2, 0], 'a new template counts its lines: ' . json_encode($tpl));
+    $page = ChangeList::item('content/pages/x/en.json', 'added', null, '{"title":"X"}', "@@ -1 +1 @@\n+{\"title\":\"X\"}\n");
+    check($page['lines'] === null, 'a new page is not shown as raw JSON lines');
+    $many = array_combine(array_map(fn ($i) => "f$i", range(1, 10)), range(1, 10));
+    $ten = ChangeList::item('content/strings/en.json', 'changed', '{}', json_encode($many));
+    check(count($ten['fields']) === 8 && $ten['more'] === 2 && array_column($ten['rest'], 'name') === ['F9', 'F10'], json_encode($ten));
     foreach (['templates/layout.php' => 'Template: layout (every page)', 'templates/partials/footer.php' => 'Template part: footer',
               'content/strings/en.json' => 'Buttons, labels and messages (English)', 'menu.json' => 'Menu', 'assets/img/logo.svg' => 'Image: logo.svg'] as $path => $label) {
         check(ChangeList::label($path) === $label, "$path: " . ChangeList::label($path));
@@ -76,6 +83,10 @@ test('review: submitting builds the staging preview; Review shows plain changes,
     contains($page, '?r=edit&amp;page=about&amp;lang=en', 'Edit opens the page in the editor');
     check(substr_count($page, '?r=edit&amp;') === 1, 'no Edit link for the stylesheet');
     contains($page, '<summary>Technical details</summary>');
+    contains($page, '<details class="fold fold-small change-diff">', 'the stylesheet change unfolds to its line diff');
+    contains($page, '1 line added</summary>');
+    contains($page, '<span class="add">+body{background:#fdf6e3}</span>', 'the diff shows the added line');
+    contains($page, 'data-fold-all="#draft-changes"', 'Expand all');
 
     $r = $admin->handle(admin_req('POST', 'submit', ['summary' => 'Warmer'], $html));
     check($r->status === 303, 'submit redirects');
