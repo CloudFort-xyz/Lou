@@ -42,6 +42,9 @@ final class AdminApp
     public const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'self'";
 
     private const IDLE_TIMEOUT = 7200;
+    /** Failed logins allowed per IP within LOGIN_WINDOW seconds. */
+    private const LOGIN_FAILURES = 10;
+    private const LOGIN_WINDOW = 3600;
     private const ABSOLUTE_TIMEOUT = 43200;
 
     /** Routes and the minimum role they need (null = public). */
@@ -179,9 +182,9 @@ final class AdminApp
     {
         $ipKey = 'login|' . substr(hash('sha256', $this->req->ip), 0, 32);
         $t = $this->time();
-        $tries = (int) $this->db->run('SELECT COUNT(*) FROM rate_limits WHERE key = ? AND ts > ?', [$ipKey, $t - 900])->fetchColumn();
-        if ($tries >= 10) {
-            return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('Too many attempts. Try again in 15 minutes.')], 429);
+        $tries = (int) $this->db->run('SELECT COUNT(*) FROM rate_limits WHERE key = ? AND ts > ?', [$ipKey, $t - self::LOGIN_WINDOW])->fetchColumn();
+        if ($tries >= self::LOGIN_FAILURES) {
+            return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('Too many attempts. Try again in an hour.')], 429);
         }
         $name = trim($this->req->input('user'));
         $role = (new Users($this->app->varDir . '/users.json'))->verify($name, $this->req->input('password'));

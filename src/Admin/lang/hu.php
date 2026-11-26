@@ -52,7 +52,7 @@ return [
     'You are not allowed to do that.' => 'Ehhez nincs jogosultságod.',
     'Please log in again' => 'Jelentkezz be újra',
     'Security check failed, reload the page' => 'A biztonsági ellenőrzés nem sikerült, töltsd újra az oldalt',
-    'Too many attempts. Try again in 15 minutes.' => 'Túl sok próbálkozás. Próbáld újra 15 perc múlva.',
+    'Too many attempts. Try again in an hour.' => 'Túl sok próbálkozás. Próbáld újra egy óra múlva.',
     'Wrong user name or password.' => 'Hibás felhasználónév vagy jelszó.',
     '{name} (assistant)' => '{name} (asszisztens)',
     'Copy' => 'Másolás',

@@ -72,6 +72,16 @@ test('admin: login checks the password, regenerates the session and rate-limits'
     }
     $r = $admin2->handle(admin_req('POST', 'login', ['user' => 'bence', 'password' => 'correct horse battery']));
     check($r->status === 429, 'login must be rate limited after 10 failures, got ' . $r->status);
+
+    // the window is an hour: 10 failures 50 minutes ago still block, 70 minutes ago they don't
+    [$admin3, , , $db3] = admin_setup(loggedIn: false);
+    $key = 'login|' . substr(hash('sha256', '203.0.113.9'), 0, 32);
+    for ($i = 0; $i < 10; $i++) {
+        $db3->run('INSERT INTO rate_limits (key, ts) VALUES (?, ?)', [$key, time() - 3000]);
+    }
+    check($admin3->handle(admin_req('POST', 'login', ['user' => 'bence', 'password' => 'correct horse battery']))->status === 429, 'failures within the hour count');
+    $db3->run('UPDATE rate_limits SET ts = ?', [time() - 4200]);
+    check($admin3->handle(admin_req('POST', 'login', ['user' => 'bence', 'password' => 'correct horse battery']))->status === 303, 'older failures expire');
 });
 
 test('admin: requires login, CSRF, same origin and the right role', function () {
