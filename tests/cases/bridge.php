@@ -295,3 +295,51 @@ test('bridge: assistants screen creates a token once and revokes it; live build 
     check(!str_contains($stub, '__LOU_ROOT__'), 'root substituted');
 });
 
+
+test('bridge: tool arguments in the shapes other clients send (Copilot Studio, OpenAPI connectors)', function () {
+    [$mcp, $token, $app] = bridge_setup();
+    $read = static function (array $params) use ($mcp, $token): array {
+        [, $res] = rpc($mcp, $token, ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'read_file'] + $params]);
+        return $res['result'];
+    };
+    $ok = static fn (array $r): bool => $r['isError'] === false && str_contains($r['content'][0]['text'], 'home');
+    $shapes = [
+        'spec' => ['arguments' => ['path' => 'menu.json']],
+        'JSON string' => ['arguments' => '{"path": "menu.json"}'],
+        'camelCase' => ['arguments' => ['filePath' => 'menu.json']],
+        'snake_case' => ['arguments' => ['file_path' => 'menu.json']],
+        'capitalised' => ['arguments' => ['Path' => 'menu.json']],
+        'wrapped object' => ['arguments' => ['body' => ['path' => 'menu.json']]],
+        'wrapped string' => ['arguments' => ['input' => '{"path":"menu.json"}']],
+        'input key' => ['input' => ['path' => 'menu.json']],
+        'next to name' => ['path' => 'menu.json'],
+        'value object' => ['arguments' => ['path' => ['value' => 'menu.json']]],
+        'extra keys' => ['arguments' => ['path' => 'menu.json', 'encoding' => 'utf-8']],
+    ];
+    foreach ($shapes as $label => $params) {
+        check($ok($read($params)), "read_file with arguments as $label");
+    }
+
+    // declared names win over aliases, and an alias never takes another parameter's value
+    check(Tools::normaliseArguments('write_file', ['path' => 'a.json', 'file' => 'b.json', 'content' => '{}']) === ['path' => 'a.json', 'content' => '{}'], 'declared name wins');
+    check(Tools::normaliseArguments('upload_image', ['filename' => 'a.png', 'data' => 'QQ==']) === ['filename' => 'a.png', 'data_base64' => 'QQ=='], 'upload aliases');
+    check(Tools::normaliseArguments('write_file', ['path' => 'a.json', 'content' => ['title' => 'Á']])['content'] === "{\n    \"title\": \"Á\"\n}\n", 'JSON content sent as an object');
+    check(Tools::normaliseArguments('describe_site', ['anything' => 1]) === [], 'no-argument tools ignore extras');
+    check(Tools::normaliseArguments('list_files', '') === [], 'empty string is no arguments');
+
+    // missing arguments name what arrived (keys and types, never values) and are logged for diagnosis
+    $r = $read(['arguments' => ['where' => 'secret-value']]);
+    check($r['isError'] === true, 'still an error');
+    contains($r['content'][0]['text'], "Missing argument 'path' for read_file");
+    contains($r['content'][0]['text'], '"where": string');
+    check(!str_contains($r['content'][0]['text'], 'secret-value'), 'values are not echoed');
+    contains((string) file_get_contents($app->varDir . '/error.log'), 'mcp read_file: unusable arguments');
+    $r = $read(['arguments' => ['a', 'b']]);
+    check($r['isError'] === true && str_contains($r['content'][0]['text'], 'must be a JSON object'), 'a list is refused');
+
+    // the REST fallback goes through the same mapping
+    [$s, $res] = rpc($mcp, $token, ['filePath' => 'menu.json'], [], ['tool' => 'read_file']);
+    check($s === 200 && $res['ok'] === true, 'REST with another parameter name');
+    [$s, $res] = rpc($mcp, $token, 'not json', [], ['tool' => 'read_file']);
+    check($s === 422 && $res['ok'] === false, 'REST with a broken body');
+});

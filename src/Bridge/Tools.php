@@ -50,12 +50,107 @@ final class Tools
         return ['name' => $name, 'description' => $desc, 'inputSchema' => ['type' => 'object', 'properties' => (object) $props, 'required' => $required, 'additionalProperties' => false]];
     }
 
-    /** @return string|array result for the assistant */
-    public function call(string $name, array $args): string|array
+    /** Other names clients use for our parameters (lower-case, without _ or -). */
+    private const ALIASES = [
+        'path' => ['filepath', 'file', 'filename', 'pathname', 'relativepath', 'name'],
+        'content' => ['contents', 'text', 'body', 'data', 'filecontent', 'newcontent'],
+        'data_base64' => ['base64', 'database64', 'image', 'imagebase64', 'data', 'content'],
+        'filename' => ['name', 'file', 'path'],
+        'prefix' => ['folder', 'dir', 'directory', 'path'],
+        'summary' => ['message', 'description', 'note'],
+    ];
+
+    /**
+     * Map what a client sent onto the tool's declared parameters. Clients differ: Copilot Studio and some
+     * OpenAPI connectors wrap arguments ({"body": {...}}), send them as a JSON string, or rename them
+     * (filePath, file_path, Path). Declared names always win; unknown keys are dropped.
+     *
+     * @return array<string, mixed>
+     */
+    public static function normaliseArguments(string $tool, mixed $args): array
     {
+        if (is_string($args)) {
+            $args = trim($args) === '' ? [] : json_decode($args, true);
+        }
+        if (!is_array($args) || ($args !== [] && array_is_list($args))) {
+            throw new LouException('The arguments must be a JSON object, e.g. {"path": "content/pages/about/en.json"}. Received: ' . self::shape($args));
+        }
+        $declared = [];
+        foreach (self::definitions() as $d) {
+            if ($d['name'] === $tool) {
+                $declared = array_keys((array) $d['inputSchema']['properties']);
+            }
+        }
+        if ($declared === []) {
+            return [];
+        }
+        // one wrapper level, e.g. {"arguments": {...}}, {"input": "{...}"}, {"body": {...}}
+        if (count($args) === 1 && !array_intersect(array_keys($args), $declared)) {
+            $inner = reset($args);
+            if (is_string($inner) && str_starts_with(ltrim($inner), '{')) {
+                $inner = json_decode($inner, true);
+            }
+            if (is_array($inner) && $inner !== [] && !array_is_list($inner)) {
+                $args = $inner;
+            }
+        }
+        $flat = static fn (string $k): string => strtolower(str_replace(['_', '-', ' '], '', $k));
+        $byFlat = [];
+        foreach ($args as $k => $v) {
+            $byFlat[$flat((string) $k)] ??= $v;
+        }
+        $out = [];
+        foreach ($declared as $p) {
+            if (array_key_exists($p, $args)) {
+                $out[$p] = $args[$p];
+                continue;
+            }
+            foreach ([$flat($p), ...(self::ALIASES[$p] ?? [])] as $alt) {
+                // an alias may not steal a value that belongs to another declared parameter
+                if (array_key_exists($alt, $byFlat) && ($alt === $flat($p) || !in_array($alt, array_map($flat, $declared), true))) {
+                    $out[$p] = $byFlat[$alt];
+                    break;
+                }
+            }
+        }
+        foreach ($out as $p => $v) {
+            if (is_int($v) || is_float($v)) {
+                $out[$p] = (string) $v;
+            } elseif (is_array($v) && array_keys($v) === ['value'] && is_string($v['value'])) {
+                $out[$p] = $v['value']; // {"value": "..."}
+            } elseif (is_array($v) && $p === 'content') {
+                // a JSON file sent as an object instead of a string
+                $out[$p] = json_encode($v, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n";
+            }
+        }
+        return $out;
+    }
+
+    /** Key names and value types of what a client sent, for error messages (never the values). */
+    public static function shape(mixed $args): string
+    {
+        if (!is_array($args)) {
+            return get_debug_type($args);
+        }
+        if ($args === []) {
+            return '{} (no arguments)';
+        }
+        $parts = [];
+        foreach (array_slice($args, 0, 12, true) as $k => $v) {
+            $parts[] = json_encode((string) $k, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ': '
+                . (is_array($v) ? (array_is_list($v) ? 'array' : 'object {' . implode(', ', array_slice(array_map('strval', array_keys($v)), 0, 8)) . '}') : get_debug_type($v));
+        }
+        return '{' . implode(', ', $parts) . (count($args) > 12 ? ', …' : '') . '}';
+    }
+
+    /** @return string|array result for the assistant */
+    public function call(string $name, mixed $rawArgs): string|array
+    {
+        $args = self::normaliseArguments($name, $rawArgs);
         $staging = Workspace::draft($this->app, $this->caller);
         $staging->rebase(); // see what others submitted or published meanwhile
-        $str = static fn (string $k): string => is_string($args[$k] ?? null) ? $args[$k] : throw new LouException("Missing argument '$k'");
+        $str = static fn (string $k): string => is_string($args[$k] ?? null) ? $args[$k]
+            : throw new LouException("Missing argument '$k' for $name. Send it as {\"$k\": \"...\"} in the tool arguments. Received: " . self::shape($rawArgs));
 
         $result = match ($name) {
             'describe_site'     => $this->describe($staging),
