@@ -33,11 +33,11 @@ final class Tools
         $path = ['type' => 'string', 'description' => 'Path relative to site/, e.g. templates/page.php or content/pages/about/en.json'];
         return [
             self::def('describe_site', 'Start here. Explains how this site is built (content model, templates, helpers, rules), lists languages, pages, templates and forms, and shows your draft and what is on staging.', []),
-            self::def('list_files', 'List files of the site as you see it (your draft, which includes everything on staging).', ['prefix' => ['type' => 'string', 'description' => 'Optional folder, e.g. templates or content/pages/about']]),
-            self::def('read_file', 'Read a text file of the site as you see it (your draft).', ['path' => $path], ['path']),
-            self::def('write_file', 'Create or replace a text file in your draft. PHP is checked against the template rules; JSON must be valid.', ['path' => $path, 'content' => ['type' => 'string', 'description' => 'Full new file content (UTF-8)']], ['path', 'content']),
-            self::def('delete_file', 'Delete a file from your draft (e.g. a page language file or an unused template).', ['path' => $path], ['path']),
-            self::def('upload_image', 'Add an image to your draft (it is re-encoded to WebP and resized). Returns the src to use in content JSON.', ['filename' => ['type' => 'string'], 'data_base64' => ['type' => 'string', 'description' => 'JPEG, PNG, GIF or WebP, base64-encoded']], ['filename', 'data_base64']),
+            self::def('list_site_files', 'List files of the site as you see it (your draft, which includes everything on staging).', ['prefix' => ['type' => 'string', 'description' => 'Optional folder, e.g. templates or content/pages/about']]),
+            self::def('read_site_file', 'Read a text file of the site as you see it (your draft).', ['path' => $path], ['path']),
+            self::def('write_site_file', 'Create or replace a text file in your draft. PHP is checked against the template rules; JSON must be valid.', ['path' => $path, 'content' => ['type' => 'string', 'description' => 'Full new file content (UTF-8)']], ['path', 'content']),
+            self::def('delete_site_file', 'Delete a file from your draft (e.g. a page language file or an unused template).', ['path' => $path], ['path']),
+            self::def('upload_site_image', 'Add an image to your draft (it is re-encoded to WebP and resized). Returns the src to use in content JSON.', ['filename' => ['type' => 'string'], 'data_base64' => ['type' => 'string', 'description' => 'JPEG, PNG, GIF or WebP, base64-encoded']], ['filename', 'data_base64']),
             self::def('build_preview', 'Build your draft into a private preview. Returns the preview URL, build warnings, and the URLs that will redirect once published. Fix any errors it reports.', []),
             self::def('get_changes', 'Show the changes in your draft: changed files with diffs, validation problems and conflicts with staging.', []),
             self::def('submit_for_review', 'Move the changes in your draft to staging, where a person reviews and publishes them. Include a short summary for the reviewer.', ['summary' => ['type' => 'string']], ['summary']),
@@ -48,6 +48,25 @@ final class Tools
     private static function def(string $name, string $desc, array $props, array $required = []): array
     {
         return ['name' => $name, 'description' => $desc, 'inputSchema' => ['type' => 'object', 'properties' => (object) $props, 'required' => $required, 'additionalProperties' => false]];
+    }
+
+    /**
+     * Earlier tool names, still accepted but not listed. The file tools were renamed because Copilot Studio
+     * routes a tool called read_file to its own built-in file reader ("Error: No file path provided").
+     */
+    public const OLD_NAMES = [
+        'list_files' => 'list_site_files', 'read_file' => 'read_site_file', 'write_file' => 'write_site_file',
+        'delete_file' => 'delete_site_file', 'upload_image' => 'upload_site_image',
+    ];
+
+    /** The current name of a tool, or null if there is no such tool. */
+    public static function resolve(mixed $name): ?string
+    {
+        if (!is_string($name)) {
+            return null;
+        }
+        $name = self::OLD_NAMES[$name] ?? $name;
+        return in_array($name, array_column(self::definitions(), 'name'), true) ? $name : null;
     }
 
     /** Other names clients use for our parameters (lower-case, without _ or -). */
@@ -69,6 +88,7 @@ final class Tools
      */
     public static function normaliseArguments(string $tool, mixed $args): array
     {
+        $tool = self::resolve($tool) ?? $tool;
         if (is_string($args)) {
             $args = trim($args) === '' ? [] : json_decode($args, true);
         }
@@ -146,6 +166,7 @@ final class Tools
     /** @return string|array result for the assistant */
     public function call(string $name, mixed $rawArgs): string|array
     {
+        $name = self::resolve($name) ?? throw new LouException("Unknown tool '$name'");
         $args = self::normaliseArguments($name, $rawArgs);
         $staging = Workspace::draft($this->app, $this->caller);
         $staging->rebase(); // see what others submitted or published meanwhile
@@ -154,18 +175,18 @@ final class Tools
 
         $result = match ($name) {
             'describe_site'     => $this->describe($staging),
-            'list_files'        => $staging->listFiles(is_string($args['prefix'] ?? null) ? $args['prefix'] : ''),
-            'read_file'         => $staging->read($str('path')),
-            'write_file'        => $this->write($staging, $str('path'), $str('content')),
-            'delete_file'       => $this->delete($staging, $str('path')),
-            'upload_image'      => $this->upload($staging, $str('filename'), $str('data_base64')),
+            'list_site_files'        => $staging->listFiles(is_string($args['prefix'] ?? null) ? $args['prefix'] : ''),
+            'read_site_file'         => $staging->read($str('path')),
+            'write_site_file'        => $this->write($staging, $str('path'), $str('content')),
+            'delete_site_file'       => $this->delete($staging, $str('path')),
+            'upload_site_image'      => $this->upload($staging, $str('filename'), $str('data_base64')),
             'build_preview'     => $this->preview($staging),
             'get_changes'       => $this->changes($staging),
             'submit_for_review' => $this->submit($staging, $str('summary')),
             'discard_changes'   => $this->discard($staging),
             default             => throw new LouException("Unknown tool '$name'"),
         };
-        if (!in_array($name, ['describe_site', 'list_files', 'read_file', 'get_changes'], true)) {
+        if (!in_array($name, ['describe_site', 'list_site_files', 'read_site_file', 'get_changes'], true)) {
             $this->db->audit('llm', $name, isset($args['path']) ? (string) $args['path'] : null, $this->caller);
         }
         return $result;
@@ -225,7 +246,7 @@ final class Tools
     private function changes(Workspace $s): array
     {
         if (!$s->hasChanges()) {
-            return ['changes' => false, 'note' => 'Your draft has no changes. write_file starts one.'];
+            return ['changes' => false, 'note' => 'Your draft has no changes. write_site_file starts one.'];
         }
         return ['changes' => true, 'files' => $s->changes(), 'diffs' => $s->diffs(),
             'problems' => $s->validate(), 'conflicts' => $s->conflicts()];
@@ -241,8 +262,8 @@ final class Tools
         }
         $conflicts = $s->conflicts();
         if ($conflicts) {
-            throw new LouException('Someone else changed these files on staging since you started. Read them again (read_file), '
-                . 'redo your change on top of their version with write_file, then submit again:', $conflicts);
+            throw new LouException('Someone else changed these files on staging since you started. Read them again (read_site_file), '
+                . 'redo your change on top of their version with write_site_file, then submit again:', $conflicts);
         }
         $files = $s->apply();
         $staging = Workspace::staging($this->app);
@@ -297,7 +318,7 @@ final class Tools
         # How this Lou site works
 
         Everything you change goes to your own draft (a private copy of the site). Others' drafts are separate.
-        Workflow: describe_site → read_file → write_file (repeat) → build_preview (fix problems) → share the preview URL
+        Workflow: describe_site → read_site_file → write_site_file (repeat) → build_preview (fix problems) → share the preview URL
         with the user → submit_for_review with a short summary. That puts your changes on staging, where a person
         reviews everything and publishes it. Nothing goes live before that.
 
@@ -325,7 +346,7 @@ final class Tools
 
         ## Rules
         - Templates may only use $v, plain variables, loops/conditions and simple string/array functions. No I/O, no superglobals,
-          no include/eval/new/static calls. write_file rejects anything else.
+          no include/eval/new/static calls. write_site_file rejects anything else.
         - Mark every client-editable text with $v->editable(...) so clients can change it in the admin themselves.
         - Link pages with $v->url('page-id'), never hard-coded paths. Put user-facing text in content or strings files,
           in every language.

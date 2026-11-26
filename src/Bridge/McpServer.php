@@ -15,7 +15,7 @@ use Lou\LouException;
  * plus a REST fallback for clients without MCP:
  *
  *   POST mcp.php                       JSON-RPC 2.0 (initialize, tools/list, tools/call, ping)
- *   POST mcp.php?tool=read_file        {"path": "..."} → {"ok": true, "result": ...}
+ *   POST mcp.php?tool=read_site_file  {"path": "..."} → {"ok": true, "result": ...}
  *   GET  mcp.php?openapi               OpenAPI 3.1 description of the REST fallback
  *
  * Every request except ?openapi needs "Authorization: Bearer lou_…" (or ?key=lou_… for clients that
@@ -122,9 +122,9 @@ final class McpServer
 
     private function toolsCall(string $caller, mixed $id, array $params): array
     {
-        $name = $params['name'] ?? null;
-        if (!is_string($name) || !in_array($name, array_column(Tools::definitions(), 'name'), true)) {
-            return self::error($id, -32602, 'Unknown tool: ' . (is_string($name) ? $name : '(none)'));
+        $name = Tools::resolve($params['name'] ?? null);
+        if ($name === null) {
+            return self::error($id, -32602, 'Unknown tool: ' . (is_string($params['name'] ?? null) ? $params['name'] : '(none)'));
         }
         // the spec says params.arguments; tolerate clients that use another key or put them next to name
         $args = $params['arguments'] ?? $params['input'] ?? $params['parameters'] ?? $params['args']
@@ -168,7 +168,7 @@ final class McpServer
 
     private function rest(string $caller, string $tool, mixed $args): Response
     {
-        if (!in_array($tool, array_column(Tools::definitions(), 'name'), true)) {
+        if (Tools::resolve($tool) === null) {
             return Response::json(404, ['ok' => false, 'error' => "Unknown tool '$tool'"]);
         }
         try {
