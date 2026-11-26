@@ -609,13 +609,16 @@ without approval.
   versions: 2025-06-18, 2025-03-26 and 2024-11-05. Methods: `initialize`,
   `ping`, `tools/list`, `tools/call`. Batches and notifications are accepted.
 - **Tools:** `describe_site` (start here: content model, `$v` helpers,
-  rules, pages, templates, forms, changeset state), `list_files`,
-  `read_file`, `write_file`, `delete_file`, `upload_image` (re-encoded to
+  rules, pages, templates, forms, changeset state), `list_site_files`,
+  `read_site_file`, `write_site_file`, `delete_site_file`, `upload_site_image` (re-encoded to
   WebP into staging), `build_preview` (returns the preview URL, warnings and
   the redirect report), `get_changes` (diffs, problems, conflicts),
   `submit_for_review` (with a summary for the reviewer), `discard_changes`.
   Tool failures are returned as results with `isError: true` so the model can
-  fix them.
+  fix them. The file tools were called `list_files`, `read_file`, `write_file`,
+  `delete_file` and `upload_image` until Copilot Studio turned out to route
+  `read_file` to its own built-in file reader; the old names are still
+  accepted but no longer listed.
 - **Lenient arguments.** Clients disagree on how they send tool arguments
   (Copilot Studio and OpenAPI connectors especially), so `tools/call` and the
   REST fallback accept them as a JSON string, wrapped one level deep
@@ -649,7 +652,7 @@ without approval.
   `assets/`, `config.php`, `menu.json`, `redirects.json`. Paths must be
   ASCII, with no dotfiles and no `..`. PHP is only allowed in `templates/`
   and `config.php`. Text files only (php, json, css, js, svg, txt, md,
-  html), images via `upload_image`. Max 512 KB per file, valid UTF-8.
+  html), images via `upload_site_image`. Max 512 KB per file, valid UTF-8.
 - **Template PHP is checked against an allowlist** (tokenizer based, not a
   deny-list), because it runs at build time on the server. Allowed: `$v->…`
   calls, plain variables, loops and conditions, and a list of pure string,

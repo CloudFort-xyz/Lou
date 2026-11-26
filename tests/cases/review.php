@@ -163,8 +163,8 @@ test('review: a design zip goes straight to staging with a preview, unless the d
 
 test('review: an assistant submitting gets the preview link back', function () {
     [$mcp, $token, $app] = bridge_setup();
-    $css = call_tool($mcp, $token, 'read_file', ['path' => 'assets/css/site.css'])['content'][0]['text'];
-    call_tool($mcp, $token, 'write_file', ['path' => 'assets/css/site.css', 'content' => $css . "\nb{}\n"]);
+    $css = call_tool($mcp, $token, 'read_site_file', ['path' => 'assets/css/site.css'])['content'][0]['text'];
+    call_tool($mcp, $token, 'write_site_file', ['path' => 'assets/css/site.css', 'content' => $css . "\nb{}\n"]);
     $r = json_decode(call_tool($mcp, $token, 'submit_for_review', ['summary' => 'bold'])['content'][0]['text'], true);
     check(str_contains((string) $r['preview_url'], '/_lou/p/'), json_encode($r));
     check(Workspace::staging($app)->lastPreview() !== null, 'Review has it too');
