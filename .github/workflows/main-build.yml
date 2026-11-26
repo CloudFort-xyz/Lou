@@ -1,0 +1,55 @@
+name: Main build
+# Every push to main publishes a signed pre-release zip as the rolling "latest-main" GitHub release.
+# Installs follow it only when .env.php has 'update_channel' => 'main' (see docs/install.md).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: main-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags, for the version number
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: zip, pdo_sqlite, dom, intl, mbstring, sodium
+          coverage: none
+      - name: Tests
+        run: php tests/run.php
+      - name: Version
+        id: version
+        # <next version>-main.<UTC build time>: after v0.2.0-rc.1 that is 0.2.0-main.20261126101500,
+        # after v0.2.0 it is 0.2.1-main.…, so the next real release always sorts above main builds.
+        run: |
+          tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo v0.0.0)
+          full=${tag#v}
+          core=${full%%-*}
+          if [ "$full" = "$core" ]; then
+            IFS=. read -r major minor patch <<< "$core"
+            core="$major.$minor.$((patch + 1))"
+          fi
+          echo "version=$core-main.$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+      - name: Build the zip
+        env:
+          LOU_SIGNING_KEY: ${{ secrets.LOU_SIGNING_KEY }}
+        run: php lou release --version="${{ steps.version.outputs.version }}" --out=dist
+      - name: Publish as the latest-main pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release delete latest-main --cleanup-tag --yes || true
+          gh release create latest-main dist/* --prerelease --latest=false --target "$GITHUB_SHA" \
+            --title "Lou $VERSION (main)" \
+            --notes "Pre-release build of main at $GITHUB_SHA. Installs get it only with 'update_channel' => 'main' in .env.php."

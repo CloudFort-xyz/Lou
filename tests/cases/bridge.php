@@ -46,6 +46,7 @@ test('bridge: template guard allows view helpers and blocks code execution', fun
         check(TemplateGuard::check(file_get_contents($f)) === [], basename($f) . ' should pass: ' . implode('; ', TemplateGuard::check(file_get_contents($f))));
     }
     check(TemplateGuard::check('<?php foreach ($v->field("items", []) as $i): ?><li><?= $v->e(strtoupper($i["t"])) ?></li><?php endforeach ?>') === [], 'loops and string functions are fine');
+    check(TemplateGuard::check('<?= $v->e($v->site->page("contact", $v->lang())?->menuLabel) ?><?= $v->e($v->site->globals($v->lang())["company"] ?? "") ?>') === [], 'site pages and globals are fine');
     $bad = [
         '<?php system("id") ?>', '<?php eval("1") ?>', '<?php include "/etc/passwd" ?>', '<?php $f = "system"; $f("id") ?>',
         '<?php echo $_GET["x"] ?>', '<?php new SplFileObject("x") ?>', '<?php App::x() ?>', '<?php `id` ?>',
@@ -55,6 +56,10 @@ test('bridge: template guard allows view helpers and blocks code execution', fun
         "<?php 'phpinfo'() ?>", '<?php "phpinfo"() ?>', "<?php ('php' . 'info')() ?>", "<?php \$a = ['phpinfo']; \$a[0]() ?>",
         "<?php ['Lou\\\\Support\\\\Fs', 'files']('/') ?>", '<?php $f = "phpinfo"; "{$f}"() ?>', "<?= \$v->field('f')() ?>",
         "<?php \$x = <<<EOT\nphpinfo\nEOT;\n(<<<EOT\nphpinfo\nEOT)() ?>", '<?php $c = strlen(...) ?>',
+        // namespace\\x() resolves to \\x() in a template (found by the nightly review)
+        '<?php namespace\\system("id") ?>', '<?= namespace\\strtoupper("a") ?>', '<?php echo namespace\\PHP_VERSION ?>',
+        // Lou's internals: config and server paths could be printed into public pages
+        '<?= $v->e($v->site->app->root) ?>', '<?= $v->e(implode(",", array_keys($v->site->app->config))) ?>', '<?= $v->e($v->site?->app->varDir) ?>',
     ];
     foreach ($bad as $code) {
         check(TemplateGuard::check($code) !== [], "should be rejected: $code");
@@ -275,7 +280,8 @@ test('bridge: assistants screen creates a token once and revokes it; live build 
     contains($page, 'Copilot Studio');
     contains($page, 'parameter name <code>key</code>', 'Copilot Studio sends the token as ?key=');
     contains($page, '${input:lou-token}', 'the VS Code config prompts for the token instead of storing it');
-    $id = array_key_first((new Tokens($app->varDir . '/tokens.json'))->all());
+    // (string): a token id of only digits becomes an int array key, and the form always posts a string
+    $id = (string) array_key_first((new Tokens($app->varDir . '/tokens.json'))->all());
     $admin->handle(admin_req('POST', 'token-revoke', ['id' => $id]));
     contains($admin->handle(admin_req('GET', 'assistants', [], ['headers' => ['accept' => 'text/html']]))->body, 'The token was revoked');
     check((new Tokens($app->varDir . '/tokens.json'))->verify($m[0]) === null, 'revoked');

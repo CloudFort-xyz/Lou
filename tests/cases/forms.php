@@ -119,6 +119,10 @@ test('forms: no-JS posts redirect to the localised success page', function () {
     check($bad->status === 422, 'error page status');
     contains($bad->body, 'Name is required');
     contains($bad->body, 'href="https://example.com/en/contact/"', 'back link');
+    // the site's CSP has style-src 'self': no inline styles, the page links a stylesheet from the endpoint folder
+    check(!preg_match('/\sstyle=|<style/i', $bad->body), 'no inline styles on the no-JS result page');
+    contains($bad->body, 'href="' . $app->endpoint('message.css') . '?v=');
+    check(is_file($app->outputDir() . $app->endpoint('message.css')), 'message.css is built into the endpoint folder');
 });
 
 test('forms: honeypot gets a fake success and nothing happens', function () {

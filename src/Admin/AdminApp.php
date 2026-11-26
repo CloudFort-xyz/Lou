@@ -962,6 +962,7 @@ final class AdminApp
             'needsBuild' => Updater::needsRebuild($this->app),
             'maxUpload'  => (string) ini_get('upload_max_filesize'),
             'unsignedAllowed' => $u->signaturesChecked() && $u->unsignedAllowed(),
+            'channel'    => $u->channel(),
             'checkError' => null,
         ]);
     }

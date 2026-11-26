@@ -239,7 +239,10 @@ Deploy options:
   version. Tags with a suffix (`v0.2.0-rc.1`) publish signed GitHub
   pre-releases that "Check for updates" ignores, and the Release workflow's
   manual run builds a signed test zip from any branch as an artifact.
-  See `docs/install.md`.
+  `'update_channel' => 'main'` in `.env.php` makes an install follow the
+  rolling `latest-main` pre-release instead, which the Main build workflow
+  rebuilds and signs on every push to main (versions
+  `<next>-main.<UTC time>`, newest build wins). See `docs/install.md`.
 - **Client site design from a zip (fallback, no Git).** Admin → Updates
   takes a zip of a client repository. Its templates and assets are planned
   with the same rule as `deploy --site` (`Deployer::planDesign`), checked

@@ -14,7 +14,8 @@ use Lou\Support\Fs;
  * Updates an install from a release zip, without Git: Admin → Updates and `php lou update`.
  *
  * The zip comes from the GitHub releases (checked only when someone asks, Lou never phones home by itself) or
- * is uploaded. It is verified (Release::extract), then only the code is swapped in by the Deployer, the same way
+ * is uploaded. Installs follow the latest stable release, or with 'update_channel' => 'main' in .env.php the
+ * pre-release build of the main branch (the MAIN_TAG release, rebuilt and signed by CI on every push to main). It is verified (Release::extract), then only the code is swapped in by the Deployer, the same way
  * `lou deploy` does it: site/, var/, .env.php and the live build are never touched. The new code then needs one
  * rebuild (stubs and the admin's script and styles), which runs in a fresh request or process, never in the one
  * that still has the old classes loaded.
@@ -22,6 +23,9 @@ use Lou\Support\Fs;
 final class Updater
 {
     public const REPO = 'CloudFort-xyz/Lou';
+    /** The rolling GitHub pre-release that holds the latest build of main (.github/workflows/main-build.yml). */
+    public const MAIN_TAG = 'latest-main';
+    public const CHANNELS = ['stable', 'main'];
     private const MAX_DOWNLOAD = 64 * 1024 * 1024;
 
     private readonly HttpClient $http;
@@ -68,6 +72,30 @@ final class Updater
         return \Lou\Env::load($this->app)->get('allow_unsigned_updates') === true;
     }
 
+    /**
+     * 'stable' (latest release) or 'main' (pre-release builds of the main branch). Only .env.php can choose main,
+     * like allow_unsigned_updates: it is a server decision that needs FTP/SSH access, not site content.
+     */
+    public function channel(): string
+    {
+        $channel = \Lou\Env::load($this->app)->get('update_channel') ?? 'stable';
+        if (!in_array($channel, self::CHANNELS, true)) {
+            throw new LouException("update_channel in .env.php must be 'stable' or 'main', not " . json_encode($channel));
+        }
+        return $channel;
+    }
+
+    /** Main builds are versioned <next>-main.<UTC build time>; their order is the build time, not semver. */
+    public static function isMainBuild(string $version): bool
+    {
+        return (bool) preg_match('/^\d+\.\d+\.\d+-main\.\d{14}$/', $version);
+    }
+
+    private static function buildTime(string $mainVersion): string
+    {
+        return substr($mainVersion, strrpos($mainVersion, '.') + 1);
+    }
+
     /** @return array{version: string, signature: string} see Release::inspect() */
     public function inspect(string $zipFile): array
     {
@@ -86,11 +114,12 @@ final class Updater
     public function check(): array
     {
         $repo = $this->repo();
-        $res = $this->http->request('GET', "https://api.github.com/repos/$repo/releases/latest", [
+        $main = $this->channel() === 'main';
+        $res = $this->http->request('GET', "https://api.github.com/repos/$repo/releases/" . ($main ? 'tags/' . self::MAIN_TAG : 'latest'), [
             'Accept' => 'application/vnd.github+json', 'X-GitHub-Api-Version' => '2022-11-28',
         ]);
         if ($res['status'] === 404) {
-            throw new LouException("$repo has no releases yet");
+            throw new LouException($main ? "$repo has no build of main yet (or one is being published right now, try again in a minute)" : "$repo has no releases yet");
         }
         $data = json_decode($res['body'], true);
         if ($res['status'] !== 200 || !is_array($data) || !is_string($data['tag_name'] ?? null)) {
@@ -99,17 +128,26 @@ final class Updater
         $version = ltrim($data['tag_name'], 'v');
         $url = '';
         foreach ((array) ($data['assets'] ?? []) as $asset) {
-            if (is_array($asset) && ($asset['name'] ?? '') === "lou-$version.zip" && is_string($asset['browser_download_url'] ?? null)) {
+            if (!is_array($asset) || !is_string($asset['browser_download_url'] ?? null)) {
+                continue;
+            }
+            $name = (string) ($asset['name'] ?? '');
+            if ($main && preg_match('/^lou-(.+)\.zip$/', $name, $m) && self::isMainBuild($m[1])) {
+                [$version, $url] = [$m[1], $asset['browser_download_url']];   // the tag is fixed, the zip names the build
+            } elseif (!$main && $name === "lou-$version.zip") {
                 $url = $asset['browser_download_url'];
             }
         }
         if (!str_starts_with($url, "https://github.com/$repo/releases/download/")) {
-            throw new LouException("The latest release ($version) has no lou-$version.zip attached");
+            throw new LouException($main ? 'The main build has no lou-<version>-main.<time>.zip attached' : "The latest release ($version) has no lou-$version.zip attached");
         }
         $result = [
+            'channel'   => $main ? 'main' : 'stable',
             'current'   => App::VERSION,
             'version'   => $version,
-            'newer'     => version_compare($version, App::VERSION, '>'),
+            // main: any other build is the one to have (switching from stable, or a newer push); stable: semver
+            'newer'     => $main ? $version !== App::VERSION && (!self::isMainBuild(App::VERSION) || self::buildTime($version) > self::buildTime(App::VERSION))
+                                 : version_compare($version, App::VERSION, '>'),
             'url'       => $url,
             'page'      => is_string($data['html_url'] ?? null) ? $data['html_url'] : "https://github.com/$repo/releases",
             'published' => is_string($data['published_at'] ?? null) ? $data['published_at'] : '',
@@ -144,7 +182,8 @@ final class Updater
 
     /**
      * Verifies a release zip and swaps its code into this install.
-     * @param bool $force also allow an older version
+     * @param bool $force also allow an older version (a main build counts as older than its release candidates,
+     *                    so on the main channel main builds are always allowed)
      * @param bool $unsigned skip the signature check (only when unsignedAllowed() and the person confirmed)
      * @return array{from: string, to: string, signed: bool}
      */
@@ -162,7 +201,8 @@ final class Updater
             if (version_compare(PHP_VERSION, (string) $release['php'], '<')) {
                 throw new LouException("Lou {$release['version']} needs PHP {$release['php']} or newer, this is " . PHP_VERSION);
             }
-            if (!$force && version_compare($release['version'], App::VERSION, '<')) {
+            $mainBuild = self::isMainBuild((string) $release['version']) && $this->channel() === 'main';
+            if (!$force && !$mainBuild && version_compare($release['version'], App::VERSION, '<')) {
                 throw new LouException("This zip is Lou {$release['version']}, older than the installed " . App::VERSION);
             }
             (new Deployer("$dir/" . Release::DIR))->deploy($this->app->root);

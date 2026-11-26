@@ -249,6 +249,64 @@ test('update: checks GitHub for the latest release only when asked, then downloa
     }
 });
 
+test('update: the main channel (.env.php) follows the latest-main pre-release by build time, signed like releases', function () {
+    $root = install();
+    $build = '0.2.0-main.20261126101500';
+    $tagApi = 'https://api.github.com/repos/' . Updater::REPO . '/releases/tags/' . Updater::MAIN_TAG;
+    $asset = 'https://github.com/' . Updater::REPO . '/releases/download/' . Updater::MAIN_TAG . "/lou-$build.zip";
+    $release = fn (string $v) => ['status' => 200, 'body' => json_encode(['tag_name' => Updater::MAIN_TAG, 'html_url' => 'https://github.com/x', 'prerelease' => true,
+        'assets' => [['name' => "lou-$v.zip.sha256", 'browser_download_url' => "$asset.sha256"], ['name' => "lou-$v.zip", 'browser_download_url' => $asset]]])];
+    $http = new FakeReleaseHttp([$tagApi => $release($build)]);
+
+    $u = new Updater(new App($root), $http, false);
+    check($u->channel() === 'stable', 'releases by default');
+    Fs::write("$root/.env.php", "<?php return ['update_channel' => 'main'];\n");
+    check($u->channel() === 'main', '.env.php switches to main');
+    $c = $u->check();
+    check($http->urls === [$tagApi], 'asks for the latest-main release, not releases/latest');
+    check($c['channel'] === 'main' && $c['version'] === $build && $c['newer'] && $c['url'] === $asset, 'the build is named by its zip: ' . json_encode($c));
+
+    check(Updater::isMainBuild($build) && !Updater::isMainBuild('0.2.0-rc.1') && !Updater::isMainBuild('0.2.0-main.1'), 'main build versions');
+    check(version_compare('0.2.0', $build, '>') && version_compare('0.2.1-main.20200101000000', '0.2.0', '>'), 'the next release sorts above main builds');
+
+    Fs::write("$root/.env.php", "<?php return ['update_channel' => 'nightly'];\n");
+    try {
+        $u->channel();
+        check(false, 'unknown channels are refused');
+    } catch (LouException $e) {
+        contains($e->getMessage(), "'stable' or 'main'");
+    }
+
+    // applying: main builds sort below release candidates, so only the main channel lets them in without force
+    $target = temp_dir() . '/lou';
+    (new Deployer(dirname(__DIR__, 2)))->deploy($target);
+    (new Builder(new App($target)))->build();
+    $keys = Release::keyPair();
+    $build = '0.0.1-main.20261126101500';   // below this process's App::VERSION, like a main build below an rc
+    $signed = release_zip($build, $keys);
+    $stable = new Updater(new App($target), new FakeReleaseHttp([]), $keys['public']);
+    try {
+        $stable->apply($signed);
+        check(false, 'on the stable channel a main build is an older version');
+    } catch (LouException $e) {
+        contains($e->getMessage(), 'older');
+    }
+    Fs::write("$target/.env.php", "<?php return ['update_channel' => 'main'];\n");
+    $r = $stable->apply($signed);
+    check($r['to'] === $build && $r['signed'], 'main build installed, signature checked');
+    $zip = new ZipArchive();
+    $zip->open($signed);
+    $manifest = str_replace('20261126101500', '20991231235959', (string) $zip->getFromName('lou/release.json'));
+    $zip->close();
+    zip_put($signed, 'lou/release.json', $manifest);
+    try {
+        $stable->apply($signed);
+        check(false, 'a main build with a changed release.json is refused');
+    } catch (LouException $e) {
+        contains($e->getMessage(), 'signature');
+    }
+});
+
 test('admin: Updates applies an uploaded release, then the banner asks for a rebuild', function () {
     [$admin, , $app] = admin_setup();
     $admin->useUpdater(new Updater($app, new FakeReleaseHttp([]), false));
@@ -264,6 +322,10 @@ test('admin: Updates applies an uploaded release, then the banner asks for a reb
     contains($admin->handle(admin_req('GET', 'dashboard', [], $html))->body, 'Rebuild now');
     $admin->handle(admin_req('POST', 'rebuild', [], $html));
     check(!Updater::needsRebuild($app), 'rebuilt');
+
+    check(!str_contains($admin->handle(admin_req('GET', 'updates', [], $html))->body, 'main branch'), 'no channel note on releases');
+    Fs::write($app->root . '/.env.php', "<?php return ['update_channel' => 'main'];\n");
+    contains($admin->handle(admin_req('GET', 'updates', [], $html))->body, '<strong>main branch</strong>', 'the main channel is shown');
 
     [$editor] = admin_setup('editor');
     check($editor->handle(admin_req('GET', 'updates', [], $html))->status === 403, 'editors cannot update');

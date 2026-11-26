@@ -317,7 +317,8 @@ final class FormProcessor
         return '<!doctype html><html lang="' . Html::escape($t->lang) . '"><meta charset="utf-8">'
             . '<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">'
             . '<title>' . Html::escape($message) . '</title>'
-            . '<body style="font-family:system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem">'
+            . '<link rel="stylesheet" href="' . Html::escape($this->app->endpoint('message.css') . '?v=' . App::VERSION) . '">'
+            . '<body>'
             . '<p>' . Html::escape($message) . '</p>' . ($items ? "<ul>$items</ul>" : '') . $backLink . '</body></html>';
     }
 

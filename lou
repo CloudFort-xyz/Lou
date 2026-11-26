@@ -310,7 +310,7 @@ try {
                 $zip = $opt['zip'];
             } else {
                 $c = $updater->check();
-                echo "Installed: {$c['current']}, latest release: {$c['version']}\n";
+                echo "Installed: {$c['current']}, " . ($c['channel'] === 'main' ? 'latest build of main' : 'latest release') . ": {$c['version']}\n";
                 if (isset($opt['check'])) {
                     exit($c['newer'] ? 10 : 0);
                 }
