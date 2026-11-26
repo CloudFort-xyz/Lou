@@ -352,3 +352,84 @@ test('bridge: tool arguments in the shapes other clients send (Copilot Studio, O
     [$s] = rpc($mcp, $token, ['path' => 'menu.json'], [], ['tool' => 'read_file']);
     check($s === 200, 'old name on the REST fallback');
 });
+
+test('bridge: assistants read the publish history (when, what, who submitted, who published)', function () {
+    [$mcp, $token, $app, $db] = bridge_setup();
+    $json = static fn (array $r): array => json_decode($r['content'][0]['text'], true) ?? ['raw' => $r['content'][0]['text']];
+
+    $empty = $json(call_tool($mcp, $token, 'list_site_updates'));
+    check($empty['updates'] === [] && $empty['history_enabled'] === true && $empty['waiting_for_review'] === null, 'nothing published yet');
+    check(call_tool($mcp, $token, 'get_site_update', ['id' => 'latest'])['isError'] === true, 'no latest yet');
+
+    // 1) the assistant changes a page title and submits; editor "kliens" publishes
+    $about = json_decode(call_tool($mcp, $token, 'read_file', ['path' => 'content/pages/about/en.json'])['content'][0]['text'], true);
+    call_tool($mcp, $token, 'write_file', ['path' => 'content/pages/about/en.json', 'content' => json_encode(['title' => 'Who we are'] + $about, JSON_UNESCAPED_UNICODE)]);
+    call_tool($mcp, $token, 'submit_for_review', ['summary' => 'Friendlier About title']);
+    $waiting = $json(call_tool($mcp, $token, 'list_site_updates'))['waiting_for_review'];
+    check($waiting['files'] === ['content/pages/about/en.json'] && $waiting['submissions'][0]['by'] === ['name' => 'Claude test', 'type' => 'assistant'], 'waiting for review');
+    $kliens = editor_admin($app, $db, 'kliens', 'editor');
+    $r = $kliens->handle(admin_req('POST', 'publish', ['rev' => (string) Workspace::staging($app)->meta()['rev']], ['headers' => ['accept' => 'text/html']]));
+    check($r->status === 200, 'publish 1');
+
+    // 2) admin "bence" changes a template himself and publishes
+    $bence = editor_admin($app, $db);
+    $d = Workspace::draft($app, 'user:bence');
+    $d->write('templates/page.php', $d->read('templates/page.php') . "<!-- v2 -->\n");
+    check(submit_and_publish($bence, $app, 'Template marker')->status === 200, 'publish 2');
+
+    $list = $json(call_tool($mcp, $token, 'list_site_updates'));
+    check(count($list['updates']) === 2 && $list['more'] === 0, 'two updates: ' . json_encode($list));
+    [$second, $first] = $list['updates'];
+    check($second['published_by'] === ['name' => 'bence', 'type' => 'person'] && $second['files'] === ['templates/page.php' => 'changed'], 'newest first');
+    check($first['published_by'] === ['name' => 'kliens', 'type' => 'person'], 'publisher recorded');
+    check($first['submissions'][0]['by'] === ['name' => 'Claude test', 'type' => 'assistant'] && $first['submissions'][0]['summary'] === 'Friendlier About title'
+        && $first['submissions'][0]['files'] === ['content/pages/about/en.json'], 'submitter, summary and files recorded');
+    check(str_starts_with($first['build'] ?? '', '20'), 'live build id recorded');
+    check($list['waiting_for_review'] === null, 'nothing waiting after publish');
+
+    // details: plain-language fields, diffs only on request
+    $d = $json(call_tool($mcp, $token, 'get_site_update', ['id' => $first['id']]));
+    $c = $d['changes'][0];
+    check($c['path'] === 'content/pages/about/en.json' && $c['kind'] === 'changed' && str_contains($c['label'], 'English'), 'change label: ' . json_encode($c));
+    check(in_array(['field' => 'Title', 'old' => $about['title'], 'new' => 'Who we are'], $c['fields'], true), 'field old → new: ' . json_encode($c['fields']));
+    check(!isset($c['diff']), 'no diff unless asked');
+    $d = $json(call_tool($mcp, $token, 'get_site_update', ['id' => 'latest', 'diff' => true]));
+    check($d['id'] === $second['id'], 'latest');
+    contains($d['changes'][0]['diff'], '+<!-- v2 -->');
+
+    // file filter and time filter
+    $only = $json(call_tool($mcp, $token, 'list_site_updates', ['path' => 'content/pages/about/en.json']));
+    check(count($only['updates']) === 1 && $only['updates'][0]['id'] === $first['id'] && !isset($only['other_events']), 'per-file history');
+    check($json(call_tool($mcp, $token, 'list_site_updates', ['since' => 'tomorrow']))['updates'] === [], 'since in the future');
+    check(count($json(call_tool($mcp, $token, 'list_site_updates', ['since' => '2000-01-01', 'limit' => 1]))['updates']) === 1, 'limit');
+    check($json(call_tool($mcp, $token, 'list_site_updates', ['limit' => 1]))['more'] === 1, 'more counts the rest');
+    $r = call_tool($mcp, $token, 'list_site_updates', ['since' => 'not a date at all']);
+    check($r['isError'] === true && str_contains($r['content'][0]['text'], 'Could not read since'), 'bad since');
+    $r = call_tool($mcp, $token, 'get_site_update', ['id' => '../../etc/passwd']);
+    check($r['isError'] === true && str_contains($r['content'][0]['text'], 'Unknown update id'), 'bad id');
+    $r = call_tool($mcp, $token, 'get_site_update', ['id' => $first['id'], 'path' => 'templates/page.php']);
+    check($r['isError'] === true && str_contains($r['content'][0]['text'], 'did not change'), 'path not in update');
+
+    // other live-site events: a rollback
+    $build = basename(glob($app->varDir . '/builds/before-*')[0]);
+    $bence->handle(admin_req('POST', 'rollback', ['build' => $build]));
+    $ev = $json(call_tool($mcp, $token, 'list_site_updates'))['other_events'];
+    check($ev[0]['what'] === 'rollback' && $ev[0]['by'] === ['name' => 'bence', 'type' => 'person'] && $ev[0]['detail'] === $build, 'rollback event: ' . json_encode($ev));
+
+    // argument shapes Copilot Studio and connectors send
+    [, $res] = rpc($mcp, $token, ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'get_site_update',
+        'arguments' => ['body' => ['updateId' => $second['id'], 'includeDiff' => 'true', 'filePath' => 'templates/page.php']]]]);
+    check($res['result']['isError'] === false && str_contains($res['result']['content'][0]['text'], '+<!-- v2 -->'), 'wrapped camelCase arguments');
+    [, $res] = rpc($mcp, $token, ['jsonrpc' => '2.0', 'id' => 2, 'method' => 'tools/call', 'params' => ['name' => 'list_site_updates', 'arguments' => '{"count": "1"}']]);
+    check(count(json_decode($res['result']['content'][0]['text'], true)['updates']) === 1, 'limit as a string alias in a JSON string');
+    [$s, $rest] = rpc($mcp, $token, ['id' => 'latest'], [], ['tool' => 'get_site_update']);
+    check($s === 200 && $rest['result']['id'] === $second['id'], 'REST fallback');
+
+    // read-only: marked so, not audit-logged, and nothing secret in the output
+    [, $tools] = rpc($mcp, $token, ['jsonrpc' => '2.0', 'id' => 3, 'method' => 'tools/list']);
+    $byName = array_column($tools['result']['tools'], null, 'name');
+    check(($byName['list_site_updates']['annotations']['readOnlyHint'] ?? false) === true && isset($byName['write_site_file']) && !isset($byName['write_site_file']['annotations']), 'readOnlyHint');
+    check((int) $db->run("SELECT COUNT(*) FROM audit_log WHERE action IN ('list_site_updates', 'get_site_update')")->fetchColumn() === 0, 'reads are not logged');
+    $all = json_encode([$list, $d, $ev]);
+    check(!str_contains($all, $token) && !str_contains($all, 'lou_'), 'no tokens in the history output');
+});

@@ -520,8 +520,9 @@ your draft ──submit──▶ staging (shared) ──publish──▶ site/ �
   automatic redirects.
 - **History** (like WordPress revisions, but for every file, templates
   included): each publish stores the old and new version of every file it
-  changed in `var/history/<id>/{before,after}/` with who submitted and
-  published it. The History page lists publishes, per-file history and
+  changed in `var/history/<id>/{before,after}/` with who submitted which
+  files (and their summaries), who published it, and the live build it
+  produced. The History page lists publishes, per-file history and
   diffs. "Undo this publish", "Undo just this file" and "Restore this
   version" put those versions into the person's draft, so they go live
   through the normal submit and publish. Configurable:
@@ -614,6 +615,16 @@ without approval.
   WebP into staging), `build_preview` (returns the preview URL, warnings and
   the redirect report), `get_changes` (diffs, problems, conflicts),
   `submit_for_review` (with a summary for the reviewer), `discard_changes`.
+  Read-only history (marked `readOnlyHint`, not audit-logged):
+  `list_site_updates` (publishes newest first with who submitted them,
+  person or assistant, their summaries and files, who published them, when,
+  and the live build id; filters `limit`, `since` (a date, date-time or
+  "7 days ago") and `path`; plus other live-site events from the audit log
+  (rollback, rebuild, Lou update, restore, rejected staging) and what is
+  waiting for review) and `get_site_update` (`id` or `"latest"`: each
+  changed file in plain words via `ChangeList`, field old → new; `diff: true`
+  adds unified diffs, cut at 20 KB per file; optional `path`). They only show
+  site files and actor names, never tokens, secrets or form submissions.
   Tool failures are returned as results with `isError: true` so the model can
   fix them. The file tools were called `list_files`, `read_file`, `write_file`,
   `delete_file` and `upload_image` until Copilot Studio turned out to route

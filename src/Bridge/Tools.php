@@ -42,12 +42,23 @@ final class Tools
             self::def('get_changes', 'Show the changes in your draft: changed files with diffs, validation problems and conflicts with staging.', []),
             self::def('submit_for_review', 'Move the changes in your draft to staging, where a person reviews and publishes them. Include a short summary for the reviewer.', ['summary' => ['type' => 'string']], ['summary']),
             self::def('discard_changes', 'Throw away your whole draft.', []),
+            self::def('list_site_updates', 'Read-only. The site\'s publish history, newest first: when each update went live, who submitted it (person or assistant) with their summary, who published it, and which files changed. Also lists other live-site events (rollbacks, rebuilds, Lou updates) and what is waiting for review.', [
+                'limit' => ['type' => 'integer', 'description' => 'How many updates to return (1-' . SiteUpdates::MAX_LIMIT . ', default 20)'],
+                'since' => ['type' => 'string', 'description' => 'Only updates published at or after this time, e.g. 2026-11-20, 2026-11-20T08:00:00Z or "7 days ago"'],
+                'path'  => ['type' => 'string', 'description' => 'Only updates that changed this file (relative to site/), e.g. content/pages/about/en.json'],
+            ]),
+            self::def('get_site_update', 'Read-only. Details of one published update from list_site_updates: who submitted and published it, and each changed file in plain words (page title and language, the fields that changed, old → new). Set diff to true for line diffs.', [
+                'id'   => ['type' => 'string', 'description' => 'Update id from list_site_updates, e.g. 20261126-101500-123456, or "latest"'],
+                'path' => ['type' => 'string', 'description' => 'Optional: only this file of the update'],
+                'diff' => ['type' => 'boolean', 'description' => 'Include unified line diffs (old → new). Default false.'],
+            ], ['id']),
         ];
     }
 
     private static function def(string $name, string $desc, array $props, array $required = []): array
     {
-        return ['name' => $name, 'description' => $desc, 'inputSchema' => ['type' => 'object', 'properties' => (object) $props, 'required' => $required, 'additionalProperties' => false]];
+        return ['name' => $name, 'description' => $desc, 'inputSchema' => ['type' => 'object', 'properties' => (object) $props, 'required' => $required, 'additionalProperties' => false]]
+            + (in_array($name, self::READ_ONLY, true) ? ['annotations' => ['readOnlyHint' => true]] : []);
     }
 
     /**
@@ -77,6 +88,10 @@ final class Tools
         'filename' => ['name', 'file', 'path'],
         'prefix' => ['folder', 'dir', 'directory', 'path'],
         'summary' => ['message', 'description', 'note'],
+        'id' => ['updateid', 'entryid', 'historyid', 'publishid', 'update', 'entry', 'version'],
+        'limit' => ['count', 'max', 'maxresults', 'top', 'n', 'number'],
+        'since' => ['from', 'after', 'start', 'startdate', 'fromdate', 'date'],
+        'diff' => ['diffs', 'includediff', 'includediffs', 'withdiff', 'showdiff', 'details'],
     ];
 
     /**
@@ -184,12 +199,28 @@ final class Tools
             'get_changes'       => $this->changes($staging),
             'submit_for_review' => $this->submit($staging, $str('summary')),
             'discard_changes'   => $this->discard($staging),
+            'list_site_updates' => (new SiteUpdates($this->app, $this->db))->list(SiteUpdates::limit($args['limit'] ?? null),
+                SiteUpdates::since(is_string($args['since'] ?? null) ? $args['since'] : null), self::optional($args, 'path')),
+            'get_site_update'   => (new SiteUpdates($this->app, $this->db))->get($str('id'), self::optional($args, 'path'), self::flag($args['diff'] ?? false)),
             default             => throw new LouException("Unknown tool '$name'"),
         };
-        if (!in_array($name, ['describe_site', 'list_site_files', 'read_site_file', 'get_changes'], true)) {
+        if (!in_array($name, self::READ_ONLY, true)) {
             $this->db->audit('llm', $name, isset($args['path']) ? (string) $args['path'] : null, $this->caller);
         }
         return $result;
+    }
+
+    private const READ_ONLY = ['describe_site', 'list_site_files', 'read_site_file', 'get_changes', 'list_site_updates', 'get_site_update'];
+
+    private static function optional(array $args, string $key): ?string
+    {
+        return is_string($args[$key] ?? null) && trim($args[$key]) !== '' ? $args[$key] : null;
+    }
+
+    /** true, "true", "yes", "1", 1 → true; anything else → false */
+    private static function flag(mixed $v): bool
+    {
+        return $v === true || (is_string($v) && in_array(strtolower(trim($v)), ['true', 'yes', '1', 'on', 'y'], true));
     }
 
     private function write(Workspace $s, string $path, string $content): string
@@ -321,6 +352,9 @@ final class Tools
         Workflow: describe_site → read_site_file → write_site_file (repeat) → build_preview (fix problems) → share the preview URL
         with the user → submit_for_review with a short summary. That puts your changes on staging, where a person
         reviews everything and publishes it. Nothing goes live before that.
+
+        To see what changed on the site before (when, what, who submitted and who published it): list_site_updates,
+        then get_site_update with an id (diff: true for line diffs). Both are read-only.
 
         ## Files (paths relative to site/)
         - content/pages/<page-id>/<lang>.json : one file per page and language. Keys: slug, title, menu_label, description,

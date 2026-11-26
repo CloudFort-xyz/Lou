@@ -69,13 +69,21 @@ final class History
                 copy("$newDir/$path", "$dir/after/$path");
             }
         }
-        $subs = array_map(fn ($s) => ['by' => $s['by'], 'summary' => $s['summary'], 'at' => $s['at']], $submissions);
+        $subs = array_map(fn ($s) => ['by' => $s['by'], 'summary' => $s['summary'], 'at' => $s['at'],
+            'files' => array_values(array_filter((array) ($s['files'] ?? []), 'is_string'))], $submissions);
         Fs::writeJson("$dir/entry.json", ['id' => $id, 'at' => gmdate('c'), 'by' => $by, 'submissions' => $subs, 'files' => $files]);
         $this->prune();
         return $id;
     }
 
-    /** @return list<array{id: string, at: string, by: string, submissions: list<array>, files: array<string, string>}> newest first */
+    /** Add facts known only after the publish, e.g. the id of the live build it produced. */
+    public function annotate(string $id, array $extra): void
+    {
+        $e = $this->get($id);
+        Fs::writeJson($this->dir() . "/$id/entry.json", $extra + $e);
+    }
+
+    /** @return list<array{id: string, at: string, by: string, submissions: list<array>, files: array<string, string>, build?: string}> newest first */
     public function all(?string $path = null): array
     {
         $out = [];
