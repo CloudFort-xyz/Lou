@@ -36,7 +36,7 @@ final class PathPolicy
             throw new LouException('PHP files may only live in templates/ (or be site/config.php)');
         }
         if (!in_array($ext, self::TEXT_EXT, true)) {
-            throw new LouException("Text files must be one of: " . implode(', ', self::TEXT_EXT) . ' (use upload_image for images)');
+            throw new LouException("Text files must be one of: " . implode(', ', self::TEXT_EXT) . ' (use upload_site_image for images)');
         }
         $top = explode('/', $path)[0];
         if (!in_array($top, ['templates', 'content', 'assets', 'config.php', 'menu.json', 'redirects.json'], true)) {

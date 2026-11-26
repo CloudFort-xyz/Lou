@@ -140,7 +140,7 @@ final class SiteUpdates
             if ($diff) {
                 $d = $binary ? "(binary file $kind)\n" : Diff::unified($old ?? '', $new ?? '');
                 $change['diff'] = strlen($d) > self::DIFF_LIMIT
-                    ? mb_strcut($d, 0, self::DIFF_LIMIT) . "\n… (diff cut at " . self::DIFF_LIMIT . " bytes; ask for one path, or read_file for the current version)\n"
+                    ? mb_strcut($d, 0, self::DIFF_LIMIT) . "\n… (diff cut at " . self::DIFF_LIMIT . " bytes; ask for one path, or read_site_file for the current version)\n"
                     : $d;
             }
             $changes[] = $change;

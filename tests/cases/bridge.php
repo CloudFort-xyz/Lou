@@ -156,11 +156,11 @@ test('bridge: MCP initialize, tools/list, batches, notifications and errors', fu
         ['jsonrpc' => '2.0', 'method' => 'notifications/initialized']]);
     check(count($res) === 2, 'batch answers requests only');
     $names = array_column($res[0]['result']['tools'], 'name');
-    check(in_array('write_file', $names, true) && in_array('build_preview', $names, true), 'tools listed');
+    check(in_array('write_site_file', $names, true) && in_array('build_preview', $names, true), 'tools listed');
     check($res[1]['error']['code'] === -32601, 'unknown method');
     check(rpc($mcp, $token, '{oops')[1]['error']['code'] === -32700, 'parse error');
 
-    $r = call_tool($mcp, $token, 'read_file', ['path' => '../.env.php']);
+    $r = call_tool($mcp, $token, 'read_site_file', ['path' => '../.env.php']);
     check($r['isError'] === true, 'tool errors are results with isError');
 });
 
@@ -172,14 +172,14 @@ function editor_admin(App $app, Database $db, string $user = 'bence', string $ro
 test('bridge: assistant edits its draft, previews, submits to staging; publishing makes it live', function () {
     [$mcp, $token, $app, $db] = bridge_setup();
     $info = json_decode(call_tool($mcp, $token, 'describe_site')['content'][0]['text'], true);
-    check($info['languages'] === ['hu', 'en'] && str_contains($info['guide'], 'write_file'), 'describe_site');
+    check($info['languages'] === ['hu', 'en'] && str_contains($info['guide'], 'write_site_file'), 'describe_site');
 
-    $css = call_tool($mcp, $token, 'read_file', ['path' => 'assets/css/site.css'])['content'][0]['text'];
-    $r = call_tool($mcp, $token, 'write_file', ['path' => 'assets/css/site.css', 'content' => $css . "\n.lou-test{color:red}\n"]);
+    $css = call_tool($mcp, $token, 'read_site_file', ['path' => 'assets/css/site.css'])['content'][0]['text'];
+    $r = call_tool($mcp, $token, 'write_site_file', ['path' => 'assets/css/site.css', 'content' => $css . "\n.lou-test{color:red}\n"]);
     check($r['isError'] === false, 'write css: ' . $r['content'][0]['text']);
-    $about = json_decode(call_tool($mcp, $token, 'read_file', ['path' => 'content/pages/about/hu.json'])['content'][0]['text'], true);
-    call_tool($mcp, $token, 'write_file', ['path' => 'content/pages/about/hu.json', 'content' => json_encode(['slug' => 'cegunkrol'] + $about, JSON_UNESCAPED_UNICODE)]);
-    $r = call_tool($mcp, $token, 'write_file', ['path' => 'templates/page.php', 'content' => '<?php system("id") ?>']);
+    $about = json_decode(call_tool($mcp, $token, 'read_site_file', ['path' => 'content/pages/about/hu.json'])['content'][0]['text'], true);
+    call_tool($mcp, $token, 'write_site_file', ['path' => 'content/pages/about/hu.json', 'content' => json_encode(['slug' => 'cegunkrol'] + $about, JSON_UNESCAPED_UNICODE)]);
+    $r = call_tool($mcp, $token, 'write_site_file', ['path' => 'templates/page.php', 'content' => '<?php system("id") ?>']);
     check($r['isError'] === true && str_contains($r['content'][0]['text'], 'system'), 'unsafe template refused');
 
     check(!Workspace::staging($app)->exists(), 'nothing on staging before submitting');
@@ -228,12 +228,12 @@ test('bridge: assistant edits its draft, previews, submits to staging; publishin
 
 test('bridge: invalid drafts cannot be previewed or submitted', function () {
     [$mcp, $token, $app] = bridge_setup();
-    call_tool($mcp, $token, 'write_file', ['path' => 'menu.json', 'content' => '["home", "nope"]']);
+    call_tool($mcp, $token, 'write_site_file', ['path' => 'menu.json', 'content' => '["home", "nope"]']);
     $p = json_decode(call_tool($mcp, $token, 'build_preview')['content'][0]['text'], true);
     check($p['ok'] === false && str_contains(implode(' ', $p['problems']), 'nope'), 'preview reports problems');
     check(call_tool($mcp, $token, 'submit_for_review', ['summary' => 'x'])['isError'] === true, 'cannot submit');
     check(!Workspace::staging($app)->exists(), 'nothing staged');
-    check(call_tool($mcp, $token, 'delete_file', ['path' => 'config.php'])['isError'] === true, 'config.php cannot be deleted');
+    check(call_tool($mcp, $token, 'delete_site_file', ['path' => 'config.php'])['isError'] === true, 'config.php cannot be deleted');
     call_tool($mcp, $token, 'discard_changes');
     check(!Workspace::draft($app, 'llm:Claude test')->exists(), 'discarded');
 });
@@ -244,22 +244,22 @@ test('bridge: images are re-encoded into the draft', function () {
     ob_start();
     imagepng($img);
     $png = (string) ob_get_clean();
-    $r = call_tool($mcp, $token, 'upload_image', ['filename' => 'Logó.png', 'data_base64' => base64_encode($png)]);
+    $r = call_tool($mcp, $token, 'upload_site_image', ['filename' => 'Logó.png', 'data_base64' => base64_encode($png)]);
     check($r['isError'] === false, 'upload: ' . $r['content'][0]['text']);
     $res = json_decode($r['content'][0]['text'], true);
     check(str_ends_with($res['src'], '.webp') && is_file(Workspace::draft($app, 'llm:Claude test')->siteDir() . $res['src']), 'webp in the draft: ' . $res['src']);
-    check(call_tool($mcp, $token, 'upload_image', ['filename' => 'x.png', 'data_base64' => base64_encode('<?php x')])['isError'] === true, 'non-image refused');
+    check(call_tool($mcp, $token, 'upload_site_image', ['filename' => 'x.png', 'data_base64' => base64_encode('<?php x')])['isError'] === true, 'non-image refused');
 });
 
 test('bridge: REST fallback and OpenAPI', function () {
     [$mcp, $token] = bridge_setup();
-    [$s, $res] = rpc($mcp, $token, ['path' => 'menu.json'], [], ['tool' => 'read_file']);
+    [$s, $res] = rpc($mcp, $token, ['path' => 'menu.json'], [], ['tool' => 'read_site_file']);
     check($s === 200 && $res['ok'] === true && str_contains($res['result'], 'home'), 'REST read');
-    [$s, $res] = rpc($mcp, $token, ['path' => '../x'], [], ['tool' => 'read_file']);
+    [$s, $res] = rpc($mcp, $token, ['path' => '../x'], [], ['tool' => 'read_site_file']);
     check($s === 422 && $res['ok'] === false, 'REST error');
     check(rpc($mcp, $token, [], [], ['tool' => 'rm_rf'])[0] === 404, 'unknown tool');
     $spec = json_decode($mcp->handle(new Request('GET', ['openapi' => '']))->body, true);
-    check($spec['openapi'] === '3.1.0' && isset($spec['paths']['/_lou/mcp.php?tool=write_file']), 'OpenAPI lists the tools');
+    check($spec['openapi'] === '3.1.0' && isset($spec['paths']['/_lou/mcp.php?tool=write_site_file']), 'OpenAPI lists the tools');
 });
 
 test('bridge: assistants screen creates a token once and revokes it; live build ships mcp.php', function () {
@@ -299,7 +299,7 @@ test('bridge: assistants screen creates a token once and revokes it; live build 
 test('bridge: tool arguments in the shapes other clients send (Copilot Studio, OpenAPI connectors)', function () {
     [$mcp, $token, $app] = bridge_setup();
     $read = static function (array $params) use ($mcp, $token): array {
-        [, $res] = rpc($mcp, $token, ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'read_file'] + $params]);
+        [, $res] = rpc($mcp, $token, ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'read_site_file'] + $params]);
         return $res['result'];
     };
     $ok = static fn (array $r): bool => $r['isError'] === false && str_contains($r['content'][0]['text'], 'home');
@@ -317,31 +317,40 @@ test('bridge: tool arguments in the shapes other clients send (Copilot Studio, O
         'extra keys' => ['arguments' => ['path' => 'menu.json', 'encoding' => 'utf-8']],
     ];
     foreach ($shapes as $label => $params) {
-        check($ok($read($params)), "read_file with arguments as $label");
+        check($ok($read($params)), "read_site_file with arguments as $label");
     }
 
     // declared names win over aliases, and an alias never takes another parameter's value
-    check(Tools::normaliseArguments('write_file', ['path' => 'a.json', 'file' => 'b.json', 'content' => '{}']) === ['path' => 'a.json', 'content' => '{}'], 'declared name wins');
-    check(Tools::normaliseArguments('upload_image', ['filename' => 'a.png', 'data' => 'QQ==']) === ['filename' => 'a.png', 'data_base64' => 'QQ=='], 'upload aliases');
-    check(Tools::normaliseArguments('write_file', ['path' => 'a.json', 'content' => ['title' => 'Á']])['content'] === "{\n    \"title\": \"Á\"\n}\n", 'JSON content sent as an object');
+    check(Tools::normaliseArguments('write_site_file', ['path' => 'a.json', 'file' => 'b.json', 'content' => '{}']) === ['path' => 'a.json', 'content' => '{}'], 'declared name wins');
+    check(Tools::normaliseArguments('upload_site_image', ['filename' => 'a.png', 'data' => 'QQ==']) === ['filename' => 'a.png', 'data_base64' => 'QQ=='], 'upload aliases');
+    check(Tools::normaliseArguments('write_site_file', ['path' => 'a.json', 'content' => ['title' => 'Á']])['content'] === "{\n    \"title\": \"Á\"\n}\n", 'JSON content sent as an object');
     check(Tools::normaliseArguments('describe_site', ['anything' => 1]) === [], 'no-argument tools ignore extras');
-    check(Tools::normaliseArguments('list_files', '') === [], 'empty string is no arguments');
+    check(Tools::normaliseArguments('list_site_files', '') === [], 'empty string is no arguments');
 
     // missing arguments name what arrived (keys and types, never values) and are logged for diagnosis
     $r = $read(['arguments' => ['where' => 'secret-value']]);
     check($r['isError'] === true, 'still an error');
-    contains($r['content'][0]['text'], "Missing argument 'path' for read_file");
+    contains($r['content'][0]['text'], "Missing argument 'path' for read_site_file");
     contains($r['content'][0]['text'], '"where": string');
     check(!str_contains($r['content'][0]['text'], 'secret-value'), 'values are not echoed');
-    contains((string) file_get_contents($app->varDir . '/error.log'), 'mcp read_file: unusable arguments');
+    contains((string) file_get_contents($app->varDir . '/error.log'), 'mcp read_site_file: unusable arguments');
     $r = $read(['arguments' => ['a', 'b']]);
     check($r['isError'] === true && str_contains($r['content'][0]['text'], 'must be a JSON object'), 'a list is refused');
 
     // the REST fallback goes through the same mapping
-    [$s, $res] = rpc($mcp, $token, ['filePath' => 'menu.json'], [], ['tool' => 'read_file']);
+    [$s, $res] = rpc($mcp, $token, ['filePath' => 'menu.json'], [], ['tool' => 'read_site_file']);
     check($s === 200 && $res['ok'] === true, 'REST with another parameter name');
-    [$s, $res] = rpc($mcp, $token, 'not json', [], ['tool' => 'read_file']);
+    [$s, $res] = rpc($mcp, $token, 'not json', [], ['tool' => 'read_site_file']);
     check($s === 422 && $res['ok'] === false, 'REST with a broken body');
+
+    // the file tools were renamed (Copilot Studio sends read_file to its own file reader); old names still work, unlisted
+    [, $list] = rpc($mcp, $token, ['jsonrpc' => '2.0', 'id' => 2, 'method' => 'tools/list']);
+    $names = array_column($list['result']['tools'], 'name');
+    check(in_array('read_site_file', $names, true) && !array_intersect(array_keys(Tools::OLD_NAMES), $names), 'only the new names are listed');
+    check($ok(call_tool($mcp, $token, 'read_file', ['path' => 'menu.json'])), 'read_file still works');
+    check(call_tool($mcp, $token, 'list_files', ['prefix' => 'content'])['isError'] === false, 'list_files still works');
+    [$s] = rpc($mcp, $token, ['path' => 'menu.json'], [], ['tool' => 'read_file']);
+    check($s === 200, 'old name on the REST fallback');
 });
 
 test('bridge: assistants read the publish history (when, what, who submitted, who published)', function () {
@@ -419,7 +428,7 @@ test('bridge: assistants read the publish history (when, what, who submitted, wh
     // read-only: marked so, not audit-logged, and nothing secret in the output
     [, $tools] = rpc($mcp, $token, ['jsonrpc' => '2.0', 'id' => 3, 'method' => 'tools/list']);
     $byName = array_column($tools['result']['tools'], null, 'name');
-    check(($byName['list_site_updates']['annotations']['readOnlyHint'] ?? false) === true && !isset($byName['write_file']['annotations']), 'readOnlyHint');
+    check(($byName['list_site_updates']['annotations']['readOnlyHint'] ?? false) === true && isset($byName['write_site_file']) && !isset($byName['write_site_file']['annotations']), 'readOnlyHint');
     check((int) $db->run("SELECT COUNT(*) FROM audit_log WHERE action IN ('list_site_updates', 'get_site_update')")->fetchColumn() === 0, 'reads are not logged');
     $all = json_encode([$list, $d, $ev]);
     check(!str_contains($all, $token) && !str_contains($all, 'lou_'), 'no tokens in the history output');
