@@ -30,20 +30,22 @@ use Lou\Support\Git;
 use Lou\Support\Html;
 
 /**
- * The admin at /_lou/admin.php. Routes by ?r=…; GET renders pages, POST changes things
+ * The admin at /<endpoint_dir>/admin.php. Routes by ?r=…; GET renders pages, POST changes things
  * (always with a CSRF token and a same-origin check).
  */
 final class AdminApp
 {
     /**
-     * The admin's own policy: it frames preview pages from this origin. stubs/_lou/.htaccess repeats it,
+     * The admin's own policy: it frames preview pages from this origin. stubs/_lou/.htaccess (copied into the endpoint folder) repeats it,
      * because the site-wide policy set there would otherwise win (or be combined) and block the frame.
      */
     public const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'self'";
 
     private const IDLE_TIMEOUT = 7200;
+    /** Failed logins allowed per IP within LOGIN_WINDOW seconds. */
+    private const LOGIN_FAILURES = 10;
+    private const LOGIN_WINDOW = 3600;
     private const ABSOLUTE_TIMEOUT = 43200;
-    private const SELF = '/_lou/admin.php';
 
     /** Routes and the minimum role they need (null = public). */
     private const ROUTES = [
@@ -99,6 +101,7 @@ final class AdminApp
         'POST mail-settings'  => 'admin',
         'POST mail-test'      => 'admin',
         'POST admin-language' => 'admin',
+        'POST endpoint-dir'   => 'admin',
         'GET updates'         => 'admin',
         'POST update-check'   => 'admin',
         'POST update'         => 'admin',
@@ -122,6 +125,12 @@ final class AdminApp
     ) {
     }
 
+    /** The admin's own URL path, e.g. /_app/admin.php. */
+    private function self(): string
+    {
+        return $this->app->endpoint('admin.php');
+    }
+
     public function handle(Request $req): Response
     {
         $this->req = $req;
@@ -137,7 +146,7 @@ final class AdminApp
         if ($need !== null) {
             if (!$this->user()) {
                 return $req->wantsJson() ? Response::json(401, ['ok' => false, 'message' => $this->tr('Please log in again')])
-                    : Response::redirect(self::SELF . '?r=login');
+                    : Response::redirect($this->self() . '?r=login');
             }
             if ($need === 'admin' && $this->role() !== 'admin') {
                 return $this->deny();
@@ -164,7 +173,7 @@ final class AdminApp
     private function rGetLogin(): Response
     {
         if ($this->user()) {
-            return Response::redirect(self::SELF);
+            return Response::redirect($this->self());
         }
         return $this->page($this->tr('Log in'), 'login', ['error' => null]);
     }
@@ -173,9 +182,9 @@ final class AdminApp
     {
         $ipKey = 'login|' . substr(hash('sha256', $this->req->ip), 0, 32);
         $t = $this->time();
-        $tries = (int) $this->db->run('SELECT COUNT(*) FROM rate_limits WHERE key = ? AND ts > ?', [$ipKey, $t - 900])->fetchColumn();
-        if ($tries >= 10) {
-            return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('Too many attempts. Try again in 15 minutes.')], 429);
+        $tries = (int) $this->db->run('SELECT COUNT(*) FROM rate_limits WHERE key = ? AND ts > ?', [$ipKey, $t - self::LOGIN_WINDOW])->fetchColumn();
+        if ($tries >= self::LOGIN_FAILURES) {
+            return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('Too many attempts. Try again in an hour.')], 429);
         }
         $name = trim($this->req->input('user'));
         $role = (new Users($this->app->varDir . '/users.json'))->verify($name, $this->req->input('password'));
@@ -192,13 +201,13 @@ final class AdminApp
         $this->session->set('csrf', bin2hex(random_bytes(32)));
         $this->db->audit('admin', 'login', null, strtolower($name));
         $start = $this->users()->prefs($name)->startPage;
-        return Response::redirect(self::SELF . ($start !== '' ? "?r=$start" : ''));
+        return Response::redirect($this->self() . ($start !== '' ? "?r=$start" : ''));
     }
 
     private function rPostLogout(): Response
     {
         $this->session->destroy();
-        return Response::redirect(self::SELF . '?r=login');
+        return Response::redirect($this->self() . '?r=login');
     }
 
     // ---------------------------------------------------------------- profile (every user, their own)
@@ -382,7 +391,7 @@ final class AdminApp
         return $this->page($this->tr('Edit: {title}', ['title' => $page->title]), 'edit', [
             'site'    => $site,
             'page'    => $page,
-            'preview' => Previews::urlPrefix($token) . $site->path($id, $lang),
+            'preview' => Previews::urlPrefix($this->app, $token) . $site->path($id, $lang),
             'history' => $this->historyState($id),
         ], 200, 'edit-layout');
     }
@@ -495,7 +504,7 @@ final class AdminApp
         });
         $this->db->audit('editor', 'duplicate', "$id → $new", $this->user());
         (new Previews($this->app))->rebuild('draft:' . $this->owner());
-        return Response::redirect(self::SELF . '?r=edit&page=' . rawurlencode($new) . '&lang=' . rawurlencode($this->editLang(Site::load($this->draft()->app()))));
+        return Response::redirect($this->self() . '?r=edit&page=' . rawurlencode($new) . '&lang=' . rawurlencode($this->editLang(Site::load($this->draft()->app()))));
     }
 
     /** Delete a repeatable page in the draft; it goes live through review and publish like any edit. */
@@ -662,7 +671,7 @@ final class AdminApp
             throw new LouException($this->tr('Staging has problems:'), $problems);
         }
         $p = (new Previews($this->app))->stable('staging', 'staging', $this->user());
-        $s->recordPreview($this->app->siteUrl($this->req) . Previews::urlPrefix($p['token']) . '/', $p['result']);
+        $s->recordPreview($this->app->siteUrl($this->req) . Previews::urlPrefix($this->app, $p['token']) . '/', $p['result']);
         return $this->done('review', $this->tr('The preview is up to date.'));
     }
 
@@ -721,7 +730,7 @@ final class AdminApp
         $base = $this->app->siteUrl($this->req);
         $path = $this->req->input('path');
         $path = preg_match('#^/[a-z0-9/\-]*$#', $path) ? $path : '/';
-        return Response::json(200, ['ok' => true, 'url' => $base . Previews::urlPrefix($token) . $path, 'days' => $days, 'live' => $live]);
+        return Response::json(200, ['ok' => true, 'url' => $base . Previews::urlPrefix($this->app, $token) . $path, 'days' => $days, 'live' => $live]);
     }
 
     private function rPostRevoke(): Response
@@ -795,6 +804,9 @@ final class AdminApp
         return $this->page($this->tr('Settings'), 'settings', $extra + [
             'adminLanguage' => (string) ($this->app->config['admin_language'] ?? ''),
             'adminLanguageSaved' => isset($this->req->query['language-saved']),
+            'endpointDir' => (string) $this->app->config['endpoint_dir'],
+            'endpointSaved' => isset($this->req->query['endpoint-saved']),
+            'neutralEndpointDir' => App::NEUTRAL_ENDPOINT_DIR,
             'current'    => (string) $this->app->config['base_url'],
             'configured' => $this->app->baseUrlConfigured(),
             'suggested'  => $this->req->origin(),
@@ -831,7 +843,7 @@ final class AdminApp
         $settings['mail'] = $in['mail'];
         Fs::writeJson($this->app->varDir . '/settings.json', $settings);
         $this->db->audit('admin', 'settings', "mail $transport" . ($host !== '' ? " via $host" : ''), $this->user());
-        return Response::redirect(self::SELF . '?r=settings&mail-saved=1');
+        return Response::redirect($this->self() . '?r=settings&mail-saved=1');
     }
 
     /** Send a test email with the saved settings and show what happened. */
@@ -878,7 +890,37 @@ final class AdminApp
         }
         Fs::writeJson($this->app->varDir . '/settings.json', $settings);
         $this->db->audit('admin', 'settings', 'admin_language ' . ($lang ?: 'auto'), $this->user());
-        return Response::redirect(self::SELF . '?r=settings&language-saved=1#admin-language');
+        return Response::redirect($this->self() . '?r=settings&language-saved=1#admin-language');
+    }
+
+    /**
+     * Moves the admin, form and assistant endpoints to another web folder (endpoint_dir in var/settings.json)
+     * and rebuilds, so the old folder disappears. Preview links point into the old folder, so they are rebuilt.
+     */
+    private function rPostEndpointDir(): Response
+    {
+        $dir = strtolower(trim($this->req->input('endpoint_dir')));
+        if (!App::validEndpointDir($dir)) {
+            throw new LouException($this->tr('The folder name may use lowercase letters, digits, _ and -, 2 to 40 characters.'));
+        }
+        if ($dir === $this->app->config['endpoint_dir']) {
+            return Response::redirect($this->self() . '?r=settings#endpoint-dir');
+        }
+        $file = $this->app->varDir . '/settings.json';
+        $before = $this->app->settings();
+        $settings = $before;
+        $settings['endpoint_dir'] = $dir;
+        Fs::writeJson($file, $settings);
+        $app = new App($this->app->root);
+        try {
+            (new Builder($app))->build();
+        } catch (\Throwable $e) {
+            Fs::writeJson($file, $before);
+            throw $e;
+        }
+        $this->db->audit('admin', 'settings', "endpoint_dir $dir", $this->user());
+        (new Previews($app))->rebuild();
+        return Response::redirect($app->endpoint('admin.php') . '?r=settings&endpoint-saved=1#endpoint-dir');
     }
 
     private function rPostSettings(): Response
@@ -891,7 +933,7 @@ final class AdminApp
         // the sitemap, hreflang and canonical links are built from base_url
         (new Builder(new App($this->app->root)))->build();
         (new Previews($this->app))->rebuild();
-        return Response::redirect(self::SELF . '?r=settings&saved=1');
+        return Response::redirect($this->self() . '?r=settings&saved=1');
     }
 
     // ---------------------------------------------------------------- updates
@@ -931,7 +973,7 @@ final class AdminApp
         } catch (LouException $e) {
             return $this->rGetUpdates(['checkError' => $e->getMessage()]);
         }
-        return Response::redirect(self::SELF . '?r=updates');
+        return Response::redirect($this->self() . '?r=updates');
     }
 
     /** Download the release found by the last check and swap in its code. The rebuild runs on the next request. */
@@ -945,7 +987,7 @@ final class AdminApp
             @unlink($zip);
         }
         $this->db->audit('admin', 'update', "{$r['from']} → {$r['to']}" . ($r['signed'] ? '' : ' (unsigned)'), $this->user());
-        return Response::redirect(self::SELF . '?r=updates');
+        return Response::redirect($this->self() . '?r=updates');
     }
 
     private function rPostUpdateUpload(): Response
@@ -961,7 +1003,7 @@ final class AdminApp
         }
         $r = $u->apply((string) $file['tmp_name'], $this->req->input('allow_older') === '1');
         $this->db->audit('admin', 'update', "{$r['from']} → {$r['to']} (uploaded" . ($r['signed'] ? ')' : ', unsigned)'), $this->user());
-        return Response::redirect(self::SELF . '?r=updates');
+        return Response::redirect($this->self() . '?r=updates');
     }
 
     /**
@@ -1020,7 +1062,7 @@ final class AdminApp
             $this->session->set('unsignedUpload', null);
         }
         $this->db->audit('admin', 'update', "{$r['from']} → {$r['to']} (uploaded, UNSIGNED {$info['signature']}, confirmed)", $this->user());
-        return Response::redirect(self::SELF . '?r=updates');
+        return Response::redirect($this->self() . '?r=updates');
     }
 
     /** A client site zip: its templates and assets go into the uploader's draft, then through Review. */
@@ -1097,9 +1139,10 @@ final class AdminApp
         $id = 'rollback-' . bin2hex(random_bytes(3));
         $tmp = $output->tempDir($out, $id, $output->mode());
         Fs::copyDir($this->app->varDir . "/builds/$name", $tmp);
-        if (is_dir("$out/_lou/p")) {
-            Fs::ensureDir("$tmp/_lou");
-            rename("$out/_lou/p", "$tmp/_lou/p");
+        $previews = $this->app->endpoint('p');
+        if (is_dir($out . $previews)) {
+            Fs::ensureDir(dirname($tmp . $previews));
+            rename($out . $previews, $tmp . $previews);
         }
         $old = $output->swap($tmp, $out, $id, $output->mode());
         if ($old !== null) {
@@ -1295,7 +1338,7 @@ final class AdminApp
         $token = $this->tokens()->create($this->req->input('name'));
         $this->db->audit('admin', 'token-add', $this->req->input('name'), $this->user());
         $this->session->set('new_token', $token);
-        return Response::redirect(self::SELF . '?r=assistants');
+        return Response::redirect($this->self() . '?r=assistants');
     }
 
     private function rPostTokenRevoke(): Response
@@ -1333,7 +1376,7 @@ final class AdminApp
     private function done(string $route, string $message): Response
     {
         $this->session->set('flash', $message);
-        return Response::redirect(self::SELF . '?r=' . $route);
+        return Response::redirect($this->self() . '?r=' . $route);
     }
 
     /** A timestamp as <time> with the default preferences (UTC, admin.js localises it). See Prefs::stamp(). */
@@ -1369,7 +1412,8 @@ final class AdminApp
             'user'        => $this->session->get('user'),
             'role'        => $this->role(),
             'csrf'        => $this->csrf(),
-            'self'        => self::SELF,
+            'self'        => $this->self(),
+            'endpoint'    => $this->app->endpoint(),
             'route'       => (string) ($this->req->query['r'] ?? 'dashboard'),
             'siteName'    => $this->app->config['name'],
             'baseUrl'     => $this->app->siteUrl($this->req),

@@ -1,20 +1,17 @@
-/* Lou forms: progressive enhancement for forms marked with data-lou-form.
-   Without JS the forms still work as plain POSTs. */
+/* Progressive enhancement for forms marked with data-form. Without JS they still work as plain POSTs. */
 (function () {
   'use strict';
-  var endpoint = '/_lou/submit.php';
-
   function fetchToken(form) {
-    if (form.dataset.louToken) return;
-    form.dataset.louToken = 'pending';
-    fetch(endpoint + '?token=' + encodeURIComponent(form.elements.form.value), { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+    if (form.dataset.token) return;
+    form.dataset.token = 'pending';
+    fetch(form.action + '?token=' + encodeURIComponent(form.elements.form.value), { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { if (d && d.token) { form.elements._token.value = d.token; form.dataset.louToken = 'ok'; } })
-      .catch(function () { delete form.dataset.louToken; });
+      .then(function (d) { if (d && d.token) { form.elements._token.value = d.token; form.dataset.token = 'ok'; } })
+      .catch(function () { delete form.dataset.token; });
   }
 
   function clearErrors(form) {
-    form.querySelectorAll('[data-lou-error]').forEach(function (el) { el.remove(); });
+    form.querySelectorAll('[data-error]').forEach(function (el) { el.remove(); });
     form.querySelectorAll('[aria-invalid]').forEach(function (el) { el.removeAttribute('aria-invalid'); });
   }
 
@@ -24,8 +21,8 @@
       if (!field || !field.insertAdjacentElement) return;
       field.setAttribute('aria-invalid', 'true');
       var msg = document.createElement('span');
-      msg.className = 'lou-error';
-      msg.setAttribute('data-lou-error', '');
+      msg.className = 'form-error';
+      msg.setAttribute('data-error', '');
       msg.textContent = errors[name];
       (field.closest('label') || field).insertAdjacentElement('afterend', msg);
     });
@@ -34,14 +31,21 @@
   }
 
   function status(form, text, ok) {
-    var el = form.querySelector('[data-lou-status]');
-    if (!el) return;
+    var el = form.querySelector('[data-status]');
+    if (!el) {
+      // the template has no status line: add one at the end of the form
+      el = document.createElement('p');
+      el.setAttribute('data-status', '');
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      form.appendChild(el);
+    }
     el.textContent = text;
-    el.className = 'lou-status ' + (ok ? 'lou-status--ok' : 'lou-status--error');
+    el.className = 'form-status ' + (ok ? 'form-status--ok' : 'form-status--error');
   }
 
   function recaptchaToken(form) {
-    var key = form.dataset.louRecaptcha;
+    var key = form.dataset.recaptcha;
     if (!key || !window.grecaptcha) return Promise.resolve();
     return new Promise(function (resolve) {
       window.grecaptcha.ready(function () {
@@ -61,26 +65,26 @@
     if (button) button.disabled = true;
     clearErrors(form);
     recaptchaToken(form).then(function () {
-      return fetch(endpoint, { method: 'POST', body: new FormData(form), headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+      return fetch(form.action, { method: 'POST', body: new FormData(form), headers: { Accept: 'application/json' }, credentials: 'same-origin' });
     }).then(function (r) {
       return r.json().catch(function () { return { ok: false }; });
     }).then(function (d) {
       if (d.ok) {
         form.reset();
-        delete form.dataset.louToken;
+        delete form.dataset.token;
         if (window.turnstile) window.turnstile.reset();
       } else {
         showErrors(form, d.errors);
       }
       status(form, d.message || '', !!d.ok);
     }).catch(function () {
-      status(form, form.dataset.louOffline || 'Network error', false);
+      status(form, form.dataset.offline || 'Network error', false);
     }).then(function () {
       if (button) button.disabled = false;
     });
   }
 
-  document.querySelectorAll('form[data-lou-form]').forEach(function (form) {
+  document.querySelectorAll('form[data-form]').forEach(function (form) {
     form.addEventListener('focusin', function () { fetchToken(form); }, { once: true });
     form.addEventListener('pointerdown', function () { fetchToken(form); }, { once: true });
     form.addEventListener('submit', submit);

@@ -1,7 +1,7 @@
 <?php
 /** @var callable $e */
 $base = rtrim((string) ($baseUrl ?? ''), '/');
-$mcp = $base . '/_lou/mcp.php';
+$mcp = $base . $endpoint . '/mcp.php';
 $tok = $newToken ?? 'lou_YOUR_TOKEN';
 // A snippet with a copy button. The text is copied exactly as shown (admin.js reads the element's textContent).
 $snippet = static function (string $id, string $text, string $label) use ($e, $t): string {

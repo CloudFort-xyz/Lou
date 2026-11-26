@@ -99,3 +99,19 @@ $sel = static fn (string $a, string $b): string => $a === $b ? ' selected' : '';
     <p><button class="btn btn-primary" type="submit"><?= $t('Save language') ?></button></p>
   </form>
 </section>
+
+<section class="widget settings-section" id="endpoint-dir">
+  <h2><?= $t('Admin folder') ?></h2>
+  <?php if ($endpointSaved): ?><div class="alert alert-ok"><?= $t('Moved. Update your bookmark and the address in your AI assistants.') ?></div><?php endif ?>
+  <p class="muted"><?= $t('The admin, the contact forms and the AI assistant connection live in this folder of the site: <code>{path}</code>.', ['path' => $endpoint . '/']) ?></p>
+  <details class="fold fold-small"<?= $endpointDir === 'lou' || $endpointDir === '_lou' ? ' open' : '' ?>><summary><?= $t('Change the folder') ?></summary>
+    <p class="muted"><?= $t('A neutral name such as <code>{name}</code> keeps the public site from saying which system it runs on. Moving the folder rebuilds the live site, changes the admin address and the assistant address, and makes new preview links.', ['name' => $neutralEndpointDir]) ?></p>
+    <form method="post" action="<?= $self ?>?r=endpoint-dir" class="stack" data-confirm="<?= $t('Move the admin to the new folder? Your bookmark and assistant settings will need the new address.') ?>">
+      <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+      <label><?= $t('Folder name') ?>
+        <input type="text" name="endpoint_dir" value="<?= $e($endpointDir) ?>" required pattern="[a-z0-9_][a-z0-9_\-]{1,39}" autocomplete="off" spellcheck="false">
+      </label>
+      <p><button class="btn" type="submit"><?= $t('Move the admin') ?></button></p>
+    </form>
+  </details>
+</section>

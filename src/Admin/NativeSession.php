@@ -6,7 +6,7 @@ namespace Lou\Admin;
 
 use Lou\Support\Fs;
 
-/** PHP sessions, hardened: own save path in var/, strict mode, Secure + HttpOnly + SameSite=Lax, scoped to /_lou/. */
+/** PHP sessions, hardened: own save path in var/, strict mode, Secure + HttpOnly + SameSite=Lax, read only by the endpoints. */
 final class NativeSession implements SessionStore
 {
     /**
@@ -26,10 +26,10 @@ final class NativeSession implements SessionStore
         ini_set('session.sid_bits_per_character', '6');
         ini_set('session.gc_maxlifetime', '43200');
         session_save_path($savePath);
-        session_name($https ? '__Host-lou' : 'lou');
+        session_name($https ? '__Host-sid' : 'sid');   // neutral: the cookie name doesn't say which CMS this is
         session_set_cookie_params([
             'lifetime' => 0,
-            'path'     => '/',          // __Host- prefix requires "/"; the cookie is only read by /_lou/ endpoints
+            'path'     => '/',          // __Host- prefix requires "/"; the cookie is only read by the endpoints
             'secure'   => $https,
             'httponly' => true,
             'samesite' => self::SAMESITE,

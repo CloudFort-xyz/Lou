@@ -20,7 +20,11 @@ final class App
         'output_dir'       => 'public',    // relative to the install root, or absolute
         'output_swap'      => 'rename',    // 'contents' for a document root Lou can't rename (see Build\Output)
         'keep_builds'      => 5,
+        'endpoint_dir'     => '_lou',      // web folder of the admin, form and MCP endpoints (installs since 0.2 use a neutral name)
     ];
+
+    /** Folder name new installs get for the endpoints, so the public site does not say which CMS it runs. */
+    public const NEUTRAL_ENDPOINT_DIR = '_app';
 
     public readonly string $root;
     public readonly string $siteDir;
@@ -41,11 +45,15 @@ final class App
         if (!is_array($site)) {
             throw new LouException("site/config.php must return an array");
         }
+        unset($site['endpoint_dir']);   // a server setting only: site content (or an assistant's draft) can't move the admin
         $settings = $this->settings();
         $config = array_replace(self::DEFAULTS, $site, $settings);
         if (isset($settings['mail'])) {
             // the admin only sets some mail keys; keep the rest from site/config.php
             $config['mail'] = array_replace((array) ($site['mail'] ?? []), (array) $settings['mail']);
+        }
+        if (!self::validEndpointDir((string) $config['endpoint_dir'])) {
+            throw new LouException("endpoint_dir '{$config['endpoint_dir']}' must be 2-40 lowercase letters, digits, _ or -, and not start with . or -");
         }
         if (!in_array($config['default_language'], $config['languages'], true)) {
             throw new LouException("default_language '{$config['default_language']}' is not in languages");
@@ -57,7 +65,7 @@ final class App
      * Install settings (var/settings.json), changed in the admin or written by the installer.
      * They belong to this server, not to the site, so they override site/config.php.
      */
-    public const SETTINGS = ['base_url', 'mail', 'output_dir', 'output_swap', 'admin_language'];
+    public const SETTINGS = ['base_url', 'mail', 'output_dir', 'output_swap', 'admin_language', 'endpoint_dir'];
 
     /** The mail keys the admin may set (mail.transport, mail.from, mail.from_name). */
     public const MAIL_SETTINGS = ['transport', 'from', 'from_name'];
@@ -107,6 +115,21 @@ final class App
             return rtrim((string) $this->config['base_url'], '/');
         }
         return $req?->origin() ?: rtrim((string) $this->config['base_url'], '/');
+    }
+
+    /** A folder name for the endpoints: one path segment, no dot files, nothing that clashes with assets. */
+    public static function validEndpointDir(string $dir): bool
+    {
+        return (bool) preg_match('/^[a-z0-9_][a-z0-9_-]{1,39}$/', $dir) && $dir !== 'assets';
+    }
+
+    /**
+     * Web path of an endpoint file or folder, e.g. endpoint('admin.php') = /_app/admin.php, endpoint() = /_app.
+     * The folder is the endpoint_dir setting (see NEUTRAL_ENDPOINT_DIR).
+     */
+    public function endpoint(string $file = ''): string
+    {
+        return '/' . $this->config['endpoint_dir'] . ($file === '' ? '' : '/' . ltrim($file, '/'));
     }
 
     public function outputDir(): string

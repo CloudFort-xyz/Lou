@@ -72,6 +72,16 @@ test('admin: login checks the password, regenerates the session and rate-limits'
     }
     $r = $admin2->handle(admin_req('POST', 'login', ['user' => 'bence', 'password' => 'correct horse battery']));
     check($r->status === 429, 'login must be rate limited after 10 failures, got ' . $r->status);
+
+    // the window is an hour: 10 failures 50 minutes ago still block, 70 minutes ago they don't
+    [$admin3, , , $db3] = admin_setup(loggedIn: false);
+    $key = 'login|' . substr(hash('sha256', '203.0.113.9'), 0, 32);
+    for ($i = 0; $i < 10; $i++) {
+        $db3->run('INSERT INTO rate_limits (key, ts) VALUES (?, ?)', [$key, time() - 3000]);
+    }
+    check($admin3->handle(admin_req('POST', 'login', ['user' => 'bence', 'password' => 'correct horse battery']))->status === 429, 'failures within the hour count');
+    $db3->run('UPDATE rate_limits SET ts = ?', [time() - 4200]);
+    check($admin3->handle(admin_req('POST', 'login', ['user' => 'bence', 'password' => 'correct horse battery']))->status === 303, 'older failures expire');
 });
 
 test('admin: requires login, CSRF, same origin and the right role', function () {
@@ -394,6 +404,25 @@ test('admin: settings saves base_url, rebuilds the sitemap with it, and is admin
     [$editor] = admin_setup('editor');
     $r = $editor->handle(admin_req('POST', 'settings', ['base_url' => 'https://x.hu']));
     check($r->status === 403, "editor got {$r->status}");
+});
+
+test('admin: moving the endpoint folder rebuilds the site there and redirects to the new admin', function () {
+    [$admin, $session, $app, $db] = admin_setup();
+    (new Builder($app))->build();
+    check(is_file($app->outputDir() . '/_lou/admin.php'), 'old installs keep /_lou/ until moved');
+    $r = $admin->handle(admin_req('POST', 'endpoint-dir', ['endpoint_dir' => '../x']));
+    check($r->status >= 400, 'bad folder name refused');
+    $r = $admin->handle(admin_req('POST', 'endpoint-dir', ['endpoint_dir' => '_app']));
+    check($r->status === 303 && str_starts_with((string) $r->headers['Location'], '/_app/admin.php?r=settings'), (string) ($r->headers['Location'] ?? $r->body));
+    check(Fs::readJson($app->varDir . '/settings.json')['endpoint_dir'] === '_app', 'saved');
+    check(is_file($app->outputDir() . '/_app/admin.php') && !is_dir($app->outputDir() . '/_lou'), 'site rebuilt with the new folder only');
+    $fresh = new App($app->root);
+    $page = (new AdminApp($fresh, $db, $session))->handle(admin_req('GET', 'settings', [], ['headers' => ['accept' => 'text/html']]));
+    contains($page->body, 'href="/_app/admin.css"');
+    contains($page->body, 'action="/_app/admin.php?r=endpoint-dir"');
+
+    [$editor] = admin_setup('editor');
+    check($editor->handle(admin_req('POST', 'endpoint-dir', ['endpoint_dir' => 'zz']))->status === 403, 'admin-only');
 });
 
 test('admin: the dashboard is the start screen and the side menu follows the role', function () {

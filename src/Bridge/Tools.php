@@ -32,7 +32,7 @@ final class Tools
     {
         $path = ['type' => 'string', 'description' => 'Path relative to site/, e.g. templates/page.php or content/pages/about/en.json'];
         return [
-            self::def('describe_site', 'Start here. Explains how this Lou site is built (content model, templates, helpers, rules), lists languages, pages, templates and forms, and shows your draft and what is on staging.', []),
+            self::def('describe_site', 'Start here. Explains how this site is built (content model, templates, helpers, rules), lists languages, pages, templates and forms, and shows your draft and what is on staging.', []),
             self::def('list_files', 'List files of the site as you see it (your draft, which includes everything on staging).', ['prefix' => ['type' => 'string', 'description' => 'Optional folder, e.g. templates or content/pages/about']]),
             self::def('read_file', 'Read a text file of the site as you see it (your draft).', ['path' => $path], ['path']),
             self::def('write_file', 'Create or replace a text file in your draft. PHP is checked against the template rules; JSON must be valid.', ['path' => $path, 'content' => ['type' => 'string', 'description' => 'Full new file content (UTF-8)']], ['path', 'content']),
@@ -113,7 +113,7 @@ final class Tools
             return ['ok' => false, 'problems' => $problems];
         }
         $p = (new Previews($this->app))->stable('draft', 'draft:' . $this->caller, $this->caller);
-        $url = ($this->siteUrl ?: $this->app->siteUrl()) . Previews::urlPrefix($p['token']) . '/';
+        $url = ($this->siteUrl ?: $this->app->siteUrl()) . Previews::urlPrefix($this->app, $p['token']) . '/';
         if ($s->exists()) {
             $s->recordPreview($url, $p['result']);
         }
@@ -157,8 +157,8 @@ final class Tools
         $base = $this->siteUrl ?: $this->app->siteUrl();
         $p = $previews->staging($base, $this->caller);   // the reviewer finds the preview ready
         $previews->rebuild(null, $p ? [$p['token']] : []);
-        return ['ok' => true, 'submitted' => $files, 'review_url' => $base . '/_lou/admin.php?r=review',
-            'preview_url' => $p ? rtrim($base, '/') . Previews::urlPrefix($p['token']) . '/' : null,
+        return ['ok' => true, 'submitted' => $files, 'review_url' => $base . $this->app->endpoint('admin.php') . '?r=review',
+            'preview_url' => $p ? rtrim($base, '/') . Previews::urlPrefix($this->app, $p['token']) . '/' : null,
             'note' => 'Your changes are on staging. Ask the user to open the review page, check the preview and publish.'];
     }
 

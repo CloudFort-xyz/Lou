@@ -48,7 +48,7 @@ $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title><?= $e($title) ?> · <?= $e($siteName) ?> · Lou</title>
-<link rel="stylesheet" href="/_lou/admin.css">
+<link rel="stylesheet" href="<?= $e($endpoint) ?>/admin.css">
 </head>
 <body class="<?= $user ? 'shell' : 'guest' ?>" data-csrf="<?= $e($csrf) ?>" data-self="<?= $e($self) ?>" data-date="<?= $e($datePatterns[0]) ?>" data-time="<?= $e($datePatterns[1]) ?>"<?php if ($t->js()): ?> data-i18n="<?= $e(json_encode($t->js(), JSON_UNESCAPED_UNICODE)) ?>"<?php endif ?>>
 <?php if ($user): ?>
@@ -93,6 +93,6 @@ $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
 <?php if (!empty($flash)): ?><div class="notice notice-ok" role="status"><?= $e($flash) ?></div><?php endif ?>
 <?= $content ?>
 </main>
-<script src="/_lou/admin.js" defer></script>
+<script src="<?= $e($endpoint) ?>/admin.js" defer></script>
 </body>
 </html>

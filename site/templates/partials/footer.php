@@ -6,7 +6,7 @@
     <label class="check"><input type="checkbox" name="consent" value="1" required> <?= $v->t('form.consent') ?></label>
     <?= $v->captcha('newsletter') ?>
     <button class="button" type="submit"><?= $v->t('newsletter.subscribe') ?></button>
-    <p data-lou-status role="status" aria-live="polite"></p>
+    <p data-status role="status" aria-live="polite"></p>
   </form>
   <p><?= $v->t('copyright', ['year' => date('Y'), 'company' => $v->site->globals($v->lang())['company'] ?? '']) ?> <?= $v->global('footer') ?></p>
 </footer>

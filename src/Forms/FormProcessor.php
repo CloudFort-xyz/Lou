@@ -15,7 +15,7 @@ use Lou\Support\Fs;
 use Lou\Support\Html;
 
 /**
- * Handles every visitor-facing submission (/_lou/submit.php): contact forms, newsletter sign-ups, anything
+ * Handles every visitor-facing submission (submit.php in the endpoint folder): contact forms, newsletter sign-ups, anything
  * defined under 'forms' in site/config.php.
  *
  * Pipeline: method/size → form lookup → origin → honeypot → token/min time → rate limit → captcha

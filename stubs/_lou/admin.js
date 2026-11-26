@@ -232,7 +232,7 @@
     var y = win ? win.scrollY : 0;
     var url = new URL(frame.src, location.href);
     if (path) {
-      var prefix = url.pathname.match(/^\/_lou\/p\/[a-f0-9]{32}/)[0];
+      var prefix = url.pathname.match(/^\/[a-z0-9_-]+\/p\/[a-f0-9]{32}/)[0];
       url.pathname = prefix + path;
     } else if (win) {
       url = new URL(win.location.href);
@@ -339,7 +339,7 @@
   function share(live) {
     var path = '/';
     try {
-      path = new URL(frame.contentWindow.location.href).pathname.replace(/^\/_lou\/p\/[a-f0-9]{32}/, '') || '/';
+      path = new URL(frame.contentWindow.location.href).pathname.replace(/^\/[a-z0-9_-]+\/p\/[a-f0-9]{32}/, '') || '/';
     } catch (e) { /* ignore */ }
     var box = document.getElementById('share-result');
     var field = document.getElementById('share-url');
