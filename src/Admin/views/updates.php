@@ -9,6 +9,9 @@
   <?php if ($blocked): ?>
     <p><?= $e($blocked) ?></p>
   <?php else: ?>
+    <?php if ($channel === 'main'): ?>
+      <div class="alert"><?= $t('This install follows the <strong>main branch</strong>: pre-release builds with the newest changes, signed like releases but less tested. <code>.env.php</code> sets this (<code>update_channel</code>).') ?></div>
+    <?php endif ?>
     <p class="muted"><?= $t('Updating changes Lou itself only. Your content, images, design, form submissions, settings and passwords stay as they are, and the site keeps running.') ?></p>
     <details class="fold fold-small"><summary><?= $t('Technical details') ?></summary>
       <p class="muted"><?= $t('The update replaces Lou\'s code, then the site is rebuilt with it.') ?> <?= $signed ? $t('Every update zip is checked against Lou’s release signature.') : $t('This install does not check release signatures yet (no release key), only that the files match the zip’s own list.') ?></p>
@@ -16,7 +19,7 @@
 
     <?php if ($checkError): ?><div class="alert alert-error"><?= $e($checkError) ?></div><?php endif ?>
     <?php if ($check): ?>
-      <?php if (version_compare((string) $check['version'], $version, '>')): ?>
+      <?php if (!empty($check['newer']) && (string) $check['version'] !== $version && ($check['channel'] ?? 'stable') === $channel): ?>
         <div class="alert"><strong><?= $t('Lou {version} is available.', ['version' => $check['version']]) ?></strong> <a href="<?= $e($check['page']) ?>" target="_blank" rel="noopener"><?= $t('What’s new') ?></a></div>
         <form method="post" action="<?= $self ?>?r=update" class="inline" data-confirm="<?= $t('Update Lou to {version}? A backup first is a good idea.', ['version' => $check['version']]) ?>">
           <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">

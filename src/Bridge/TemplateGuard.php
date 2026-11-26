@@ -8,7 +8,9 @@ namespace Lou\Bridge;
  * Static check for PHP written by an LLM (templates, site/config.php). Template PHP runs on the server
  * at build time, so only a small, safe subset is allowed:
  *   - functions from an allowlist (string, array, math, date, escaping); no callables, no I/O
- *   - method/property access only on $v (the View helper) and on plain variables holding arrays/scalars
+ *   - method/property access only on $v (the View helper) and on plain variables holding arrays/scalars,
+ *     and never through ->app (Lou's internals: config, server paths)
+ *   - no namespace-relative names (namespace\system() would call \system())
  *   - no eval, include/require, backticks, variable functions/variables, static calls, `new`, superglobals
  *
  * @return list<string> problems (empty = OK)
@@ -60,6 +62,9 @@ final class TemplateGuard
                 T_GLOBAL, T_STATIC, T_FUNCTION, T_FN, T_CLASS, T_INTERFACE, T_TRAIT, T_ENUM, T_DECLARE, T_NAMESPACE, T_USE,
                 T_DOUBLE_COLON, T_EXIT, T_THROW, T_DOLLAR_OPEN_CURLY_BRACES])) {
                 $bad("'" . $t->text . "'");
+            } elseif ($t->is(T_NAME_RELATIVE)) {
+                // namespace\foo resolves to \foo in a template, so it would slip past the function list
+                $bad("namespace-relative name '" . $t->text . "'");
             } elseif ($t->text === '`') {
                 $bad('backtick shell execution');
             } elseif ($t->is(T_VARIABLE) && in_array($t->text, self::SUPERGLOBALS, true)) {
@@ -86,6 +91,8 @@ final class TemplateGuard
                 }
                 if ($next !== null && !$next->is(T_STRING)) {
                     $bad('dynamic property or method names');
+                } elseif ($next !== null && strtolower($next->text) === 'app') {
+                    $bad('->app (Lou\'s configuration and server paths)');
                 }
             } elseif ($t->is(T_STRING) && in_array(strtolower($t->text), ['assert', 'create_function'], true)) {
                 $bad($t->text);

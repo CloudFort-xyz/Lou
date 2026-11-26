@@ -378,6 +378,7 @@ return [
     'The update replaces Lou\'s code, then the site is rebuilt with it.' => 'A frissítés lecseréli a Lou kódját, majd az oldal azzal újraépül.',
     'Every update zip is checked against Lou’s release signature.' => 'Minden frissítő zip aláírását ellenőrizzük a Lou kiadási kulcsával.',
     'This install does not check release signatures yet (no release key), only that the files match the zip’s own list.' => 'Ez a telepítés még nem ellenőrzi a kiadások aláírását (nincs kiadási kulcs), csak azt, hogy a fájlok egyeznek-e a zip saját listájával.',
+    'This install follows the <strong>main branch</strong>: pre-release builds with the newest changes, signed like releases but less tested. <code>.env.php</code> sets this (<code>update_channel</code>).' => 'Ez a telepítés a <strong>main ágat</strong> követi: a legújabb változásokat tartalmazó előzetes buildeket kapja, amelyek ugyanúgy alá vannak írva, mint a kiadások, de kevésbé teszteltek. Ezt a <code>.env.php</code> állítja be (<code>update_channel</code>).',
     'Lou {version} is available.' => 'Elérhető a Lou {version}.',
     'What’s new' => 'Újdonságok',
     'Update Lou to {version}? A backup first is a good idea.' => 'Frissíted a Lou-t erre: {version}? Előtte érdemes mentést készíteni.',

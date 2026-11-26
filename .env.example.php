@@ -27,4 +27,7 @@ return [
     // 'allow_unsigned_updates' => true,      // let admins install update zips that aren't signed with Lou's release key
                                               // (test builds), after a security warning. Off by default: lives here so it
                                               // needs FTP/SSH access, not just an admin login.
+    // 'update_channel' => 'main',            // follow pre-release builds of the main branch instead of releases
+                                              // (Admin → Updates, php lou update). Signed like releases, less tested.
+                                              // Remove it to go back: the next release then shows up as the update.
 ];
