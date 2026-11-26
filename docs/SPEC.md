@@ -616,6 +616,15 @@ without approval.
   `submit_for_review` (with a summary for the reviewer), `discard_changes`.
   Tool failures are returned as results with `isError: true` so the model can
   fix them.
+- **Lenient arguments.** Clients disagree on how they send tool arguments
+  (Copilot Studio and OpenAPI connectors especially), so `tools/call` and the
+  REST fallback accept them as a JSON string, wrapped one level deep
+  (`{"body": {…}}`), under `params.input`/`params.parameters` or next to
+  `name`, with other spellings of a parameter (`filePath`, `file_path`,
+  `Path`, a few aliases), `{"value": "…"}` objects, and JSON file content sent
+  as an object. Declared names always win and unknown keys are dropped. A
+  missing argument error names the keys and types that arrived (never the
+  values), and the same line goes to `var/error.log`.
 - **Auth:** per-assistant bearer tokens (`lou_` + 192 random bits), created
   under Admin → Assistants or with `php lou token add NAME`, stored as
   SHA-256 hashes in `var/tokens.json`, revocable. `?key=` is accepted for

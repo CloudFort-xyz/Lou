@@ -65,7 +65,7 @@ final class McpServer
 
         $input = json_decode($req->body, true);
         if (isset($req->query['tool'])) {
-            return $this->rest($caller, (string) $req->query['tool'], $req->body === '' ? [] : $input);
+            return $this->rest($caller, (string) $req->query['tool'], trim($req->body) === '' ? [] : ($input ?? $req->body));
         }
         if (!is_array($input)) {
             return Response::json(400, self::error(null, -32700, 'Parse error: the body must be JSON-RPC 2.0'));
@@ -126,21 +126,25 @@ final class McpServer
         if (!is_string($name) || !in_array($name, array_column(Tools::definitions(), 'name'), true)) {
             return self::error($id, -32602, 'Unknown tool: ' . (is_string($name) ? $name : '(none)'));
         }
-        $args = $params['arguments'] ?? [];
-        if (!is_array($args)) {
-            return self::error($id, -32602, 'arguments must be an object');
-        }
+        // the spec says params.arguments; tolerate clients that use another key or put them next to name
+        $args = $params['arguments'] ?? $params['input'] ?? $params['parameters'] ?? $params['args']
+            ?? array_diff_key($params, ['name' => 1, '_meta' => 1, 'arguments' => 1]);
         try {
             $result = $this->call($caller, $name, $args);
             $text = is_string($result) ? $result : (string) json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             return self::result($id, ['content' => [['type' => 'text', 'text' => $text]], 'isError' => false]);
         } catch (LouException $e) {
+            if (str_contains($e->getMessage(), 'Received: ')) {
+                // what the client actually sent (names and types only), so odd clients can be diagnosed from var/error.log
+                @file_put_contents($this->app->varDir . '/error.log', gmdate('c') . " mcp $name: unusable arguments; params were "
+                    . Tools::shape($params) . ', arguments ' . Tools::shape($args) . "\n", FILE_APPEND | LOCK_EX);
+            }
             // tool errors are results the model can read and fix, not protocol errors
             return self::result($id, ['content' => [['type' => 'text', 'text' => $e->getMessage()]], 'isError' => true]);
         }
     }
 
-    private function call(string $caller, string $name, array $args): string|array
+    private function call(string $caller, string $name, mixed $args): string|array
     {
         $key = 'mcp-call|' . substr(hash('sha256', $caller), 0, 32);
         if ($this->count($key, 600) >= self::CALLS_PER_10_MIN) {
@@ -166,9 +170,6 @@ final class McpServer
     {
         if (!in_array($tool, array_column(Tools::definitions(), 'name'), true)) {
             return Response::json(404, ['ok' => false, 'error' => "Unknown tool '$tool'"]);
-        }
-        if (!is_array($args) || ($args !== [] && array_is_list($args))) {
-            return Response::json(400, ['ok' => false, 'error' => 'The body must be a JSON object']);
         }
         try {
             return Response::json(200, ['ok' => true, 'result' => $this->call($caller, $tool, $args)]);
