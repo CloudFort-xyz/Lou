@@ -55,6 +55,46 @@ final class Database
                 detail  TEXT
             );
             SQL,
+        // OAuth for the MCP bridge (Lou\Bridge\OAuth); secrets, codes and tokens are SHA-256 hashes
+        2 => <<<SQL
+            CREATE TABLE oauth_clients (
+                id           TEXT PRIMARY KEY,
+                secret_hash  TEXT,                     -- NULL: public client (PKCE only)
+                name         TEXT NOT NULL,
+                redirect_uris TEXT NOT NULL DEFAULT '[]',
+                auth_method  TEXT NOT NULL,
+                dynamic      INTEGER NOT NULL,         -- 1: registered itself (RFC 7591), 0: made by an admin
+                created_by   TEXT,
+                created_at   TEXT NOT NULL
+            );
+            CREATE TABLE oauth_codes (
+                hash         TEXT PRIMARY KEY,
+                client_id    TEXT NOT NULL,
+                user         TEXT NOT NULL,
+                redirect_uri TEXT NOT NULL,
+                challenge    TEXT NOT NULL DEFAULT '',
+                resource     TEXT NOT NULL DEFAULT '',
+                expires      INTEGER NOT NULL
+            );
+            CREATE TABLE oauth_grants (
+                id           TEXT PRIMARY KEY,
+                client_id    TEXT NOT NULL,
+                user         TEXT NOT NULL,
+                name         TEXT NOT NULL,            -- the assistant's name in drafts and the audit log
+                sv           INTEGER NOT NULL DEFAULT 0,
+                created_at   TEXT NOT NULL,
+                last_used    TEXT,
+                UNIQUE (client_id, user)
+            );
+            CREATE TABLE oauth_tokens (
+                hash         TEXT PRIMARY KEY,
+                grant_id     TEXT NOT NULL,
+                kind         TEXT NOT NULL,            -- access | refresh
+                expires      INTEGER NOT NULL,
+                used_at      INTEGER                   -- refresh tokens: when it was rotated
+            );
+            CREATE INDEX oauth_tokens_grant ON oauth_tokens (grant_id);
+            SQL,
     ];
 
     public readonly \PDO $pdo;

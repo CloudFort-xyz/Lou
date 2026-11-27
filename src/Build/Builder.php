@@ -96,7 +96,7 @@ final class Builder
             if ($live) {
                 // stubs/.htaccess goes to the web root, stubs/_lou/ to the endpoint folder (setting endpoint_dir)
                 $endpoints = $tmp . $this->app->endpoint();
-                Fs::write($tmp . '/.htaccess', (string) file_get_contents($this->app->stubsDir . '/.htaccess'));
+                Fs::write($tmp . '/.htaccess', str_replace('__ENDPOINT_DIR__', (string) $this->app->config['endpoint_dir'], (string) file_get_contents($this->app->stubsDir . '/.htaccess')));
                 Fs::copyDir($this->app->stubsDir . '/_lou', $endpoints);
                 foreach (glob($endpoints . '/*.php') ?: [] as $stub) {
                     // endpoint stubs require Lou core from outside the web root

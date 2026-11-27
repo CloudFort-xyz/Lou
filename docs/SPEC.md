@@ -49,7 +49,7 @@ lou/                      ← repository / install root (NOT web-accessible)
 ├── vendor-bundled/       ← bundled single libraries (PHPMailer), no Composer needed
 ├── stubs/                ← files copied verbatim into every build
 │   ├── .htaccess         ← security headers, caching, PHP lockdown (+ generated redirects)
-│   └── _lou/             ← endpoint stubs: submit.php, admin/, mcp.php, preview.php
+│   └── _lou/             ← endpoint stubs: submit.php, admin/, mcp.php, oauth.php, preview.php
 ├── site/                 ← THE SITE (what clients and LLMs change)
 │   ├── config.php        ← site settings, languages, forms (no secrets)
 │   ├── menu.json         ← menu structure (page ids only)
@@ -692,20 +692,59 @@ without approval.
   as an object. Declared names always win and unknown keys are dropped. A
   missing argument error names the keys and types that arrived (never the
   values), and the same line goes to `var/error.log`.
-- **Auth:** per-assistant bearer tokens (`lou_` + 192 random bits), created
+- **Auth, way 1: signing in (OAuth 2.1).** Lou is its own authorization
+  server (`Lou\Bridge\OAuth`, `oauth.php` in the endpoint folder), following
+  the MCP authorization spec, so Claude, ChatGPT, Copilot Studio, VS Code and
+  Gemini CLI connect with just the bridge URL:
+  - A 401 from `mcp.php` carries `WWW-Authenticate: Bearer resource_metadata="…/oauth.php?well-known=oauth-protected-resource"`
+    (RFC 9728). The issuer is the site address; its RFC 8414 metadata is at
+    `oauth.php?well-known=oauth-authorization-server`, and the web root's
+    `.htaccess` rewrites `/.well-known/oauth-authorization-server`,
+    `/.well-known/oauth-protected-resource` and `/.well-known/openid-configuration`
+    there (so the host's own `.well-known` folder is never touched).
+  - Clients register themselves (RFC 7591, `oauth.php?register`, 20 per hour
+    per IP, unused ones forgotten after 7 days), or an admin creates **app
+    credentials** (client id + secret) for apps that ask for them, such as
+    Copilot Studio's Manual mode. Redirect URIs: https, http only on loopback
+    (any port, RFC 8252), or an app scheme; matched exactly. App credentials
+    made without a redirect URL learn it from the first approved sign-in.
+  - Authorization code + PKCE (S256). PKCE is required for public clients and
+    optional for clients that authenticate with their secret (Copilot Studio's
+    Manual mode sends none). `oauth.php?authorize` forwards to the admin's
+    consent screen (`admin.php?r=authorize`), which uses the normal login and
+    two-step login and returns there after login. Only **editors and admins**
+    can approve, since they can publish what an assistant submits anyway. The
+    consent screen names the app (marked as self-registered) and the host the
+    browser goes back to. Unknown clients and unregistered redirect URIs get
+    an error page, never a redirect. After approval the browser is sent on
+    with a `Refresh` page, not a 303, because browsers apply the admin's
+    `form-action 'self'` to redirects after a form post.
+  - One **grant** per app and person, named "App – user": the assistant's
+    name in drafts, Review and the audit log. Access tokens (`louat_`) last an
+    hour, refresh tokens (`lourt_`) 90 days and rotate on every use; a rotated
+    refresh token sent again after 60 s ends the grant. A grant stops working
+    while its person is removed or below editor, and ends when they change
+    their password or sign out everywhere. Grants are listed and disconnected
+    under Users → AI assistants; RFC 7009 revocation at `oauth.php?revoke`.
+    Clients, codes, grants and tokens are in SQLite (migration 2); secrets,
+    codes and tokens only as SHA-256 hashes.
+- **Auth, way 2: bridge tokens** for clients that can't sign in:
+  per-assistant bearer tokens (`lou_` + 192 random bits), created
   under Admin → Users → AI assistants or with `php lou token add NAME`, stored as
   SHA-256 hashes in `var/tokens.json`, revocable. `?key=` is accepted for
-  clients that can only take a URL. Browser `Origin` headers must match
-  `base_url` (or `bridge.allowed_origins`). Failed auth (20 per 15 min per
-  IP) and calls (300 per 10 min per token) are rate-limited. OAuth 2.1 can
-  come later.
+  clients that can only take a URL.
+- Browser `Origin` headers must match `base_url` (or
+  `bridge.allowed_origins`); `oauth.php` answers CORS from any origin since it
+  uses no cookies. Failed auth (20 per 15 min per IP), failed token requests
+  (30 per 15 min per IP) and calls (300 per 10 min per assistant) are
+  rate-limited.
 - **REST fallback.** `POST /_lou/mcp.php?tool=<name>` with a JSON object body
   returns `{"ok": true, "result": …}`. `GET /_lou/mcp.php?openapi` describes
   it (OpenAPI 3.1, generated from the same tool definitions).
 
 ### Drafts for assistants
 
-- Each token works in its own draft, exactly like an admin user (8.1).
+- Each token or signed-in assistant works in its own draft, exactly like an admin user (8.1).
   `build_preview` builds that draft at a stable secret link,
   `submit_for_review` moves its changes to staging with a summary, and
   `discard_changes` deletes the draft. Publishing happens in the admin.
