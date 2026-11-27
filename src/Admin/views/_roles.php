@@ -11,7 +11,7 @@
   <dt><?= $e($roleName('admin')) ?></dt>
   <dd><?= $t('Everything, including users, assistants, settings, updates, backups, builds and redirects.') ?></dd>
 </dl>
-<p class="muted"><?= $t('AI assistants are not users: they connect with a token from the Assistants page, work in their own draft like a contributor, and never publish.') ?></p>
+<p class="muted"><?= $t('AI assistants are not users: they connect with a token from the AI assistants tab and work in their own draft like a contributor, but can also change templates and design files. They never publish.') ?></p>
 <details class="fold-small"><summary><?= $t('Technical details') ?></summary>
 <ul class="muted">
   <li><?= $t('Users are stored in <code>var/users.json</code> (readable only by the web server). Passwords are stored as PHP <code>password_hash</code> hashes, never in plain text.') ?></li>

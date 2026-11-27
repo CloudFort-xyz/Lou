@@ -441,11 +441,24 @@ expiry).
   - *Rate limits:* 10 failed logins an hour per IP and 20 per account (any
     IP), never a permanent lock.
   - Every user change, login, invite and reset is in the audit log.
+  - *Two-step login (TOTP, RFC 6238)*, optional per user on the Profile page:
+    a QR code (drawn as SVG by `Support\QrCode`, no library) or the key to
+    type, confirmed with a first code; then 10 recovery codes shown once
+    (SHA-256 stored, each works once). Login asks for the code after the
+    password (a 5-minute pending step, not a session); codes work once, one
+    30 s step of drift, wrong codes count towards the login limits. A reset
+    link doesn't skip the code. Turning it off or renewing recovery codes needs
+    the password. Admins can **require it for everyone** on the Users page
+    (`require_2fa` in `var/settings.json`, never from `site/config.php`, so an
+    assistant's draft can't turn it off; they must have it on themselves
+    first): people without it can only set it up. Admins reset it for a lost
+    phone (also `php lou user 2fa-reset NAME`), which signs the user out.
+- **AI assistants** are a tab of the Users section (People | AI assistants).
 - Sessions are hardened: their own save path in
   `var/sessions`, strict mode, a `__Host-` cookie with Secure, HttpOnly and
   SameSite=Lax (Strict would sign people out when they open an admin link
   from another site), a 2 h idle and 12 h absolute timeout, CSRF tokens on every
-  POST, a same-origin check, and login rate limiting. TOTP can come later.
+  POST, a same-origin check, and login rate limiting.
 - **Previews are static builds at secret URLs** (`/_lou/p/<128-bit token>/`)
   inside the web root, so they need no PHP to view and work on any host.
   They're never indexed, survive publishing, and expire. The admin's editing
@@ -680,7 +693,7 @@ without approval.
   missing argument error names the keys and types that arrived (never the
   values), and the same line goes to `var/error.log`.
 - **Auth:** per-assistant bearer tokens (`lou_` + 192 random bits), created
-  under Admin → Assistants or with `php lou token add NAME`, stored as
+  under Admin → Users → AI assistants or with `php lou token add NAME`, stored as
   SHA-256 hashes in `var/tokens.json`, revocable. `?key=` is accepted for
   clients that can only take a URL. Browser `Origin` headers must match
   `base_url` (or `bridge.allowed_origins`). Failed auth (20 per 15 min per

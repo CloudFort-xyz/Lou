@@ -10,7 +10,8 @@ $snippet = static function (string $id, string $text, string $label) use ($e, $t
         . '<button class="btn btn-copy" type="button" data-copy="' . $id . '" aria-label="' . $t('Copy {what}', ['what' => $label]) . '">' . $t('Copy') . '</button></div>';
 };
 ?>
-<h1><?= $t('Assistants') ?></h1>
+<h1><?= $t('Users') ?></h1>
+<?php require __DIR__ . '/_users-tabs.php' ?>
 <p class="lead"><?= $t('Let an AI assistant such as Claude or ChatGPT change your site\'s layout, design, menus and content. Nothing it does goes live by itself: its changes wait for you on the {!review} page.', ['review' => '<a href="' . $self . '?r=review">' . $t('Review') . '</a>']) ?></p>
 
 <?php if ($newToken): ?>

@@ -215,3 +215,127 @@ test('users: assistant tokens remember who created them', function () {
     check(array_values($all)[0]['by'] === 'bence', json_encode($all));
     contains($admin->handle(admin_req('GET', 'assistants', [], HTML))->body, '<td class="hide-sm">bence</td>');
 });
+
+test('totp: codes match RFC 6238, work once, allow one step of drift, and the QR code holds the otpauth link', function () {
+    $secret = \Lou\Admin\Totp::base32Encode('12345678901234567890');
+    check($secret === 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', $secret);
+    // RFC 6238 appendix B (SHA-1), last 6 digits
+    foreach ([59 => '287082', 1111111109 => '081804', 1234567890 => '005924', 2000000000 => '279037'] as $time => $code) {
+        check(\Lou\Admin\Totp::code($secret, intdiv($time, 30)) === $code, "code at $time");
+    }
+    check(\Lou\Admin\Totp::verify($secret, '287 082', 59) === 1, 'spaces are ignored');
+    check(\Lou\Admin\Totp::verify($secret, '287082', 59 + 30) === 1 && \Lou\Admin\Totp::verify($secret, '287082', 59 + 60) === null, 'one step of drift');
+    check(\Lou\Admin\Totp::verify($secret, '287082', 59, 1) === null, 'a used step is refused');
+    check(\Lou\Admin\Totp::base32Decode(\Lou\Admin\Totp::base32Encode("\x00\xffabc")) === "\x00\xffabc", 'base32 round trip');
+    $svg = \Lou\Support\QrCode::encode(\Lou\Admin\Totp::uri($secret, 'bence', 'Példa Kft.'))->svg(200, 'QR');
+    check(str_starts_with($svg, '<svg') && str_contains($svg, 'aria-label="QR"') && !str_contains($svg, 'style'), 'an SVG without inline styles');
+    // a known small symbol: "HELLO" in byte mode is version 1 (21×21) with finder patterns in three corners
+    $m = \Lou\Support\QrCode::encode('HELLO')->modules();
+    check(count($m) === 21 && $m[0][0] && $m[0][6] && !$m[1][1] && $m[2][2] && $m[0][20] && $m[20][0] && !$m[7][7], 'version 1 with finder patterns');
+});
+
+/** Turn on two-step login for a user through the Profile page. @return array{0: string, 1: list<string>} secret and recovery codes */
+function users_enable_totp(AdminApp $admin, ArraySession $session, int $now): array
+{
+    $admin->handle(admin_req('POST', 'totp-start', [], HTML));
+    $secret = (string) $session->get('totp_setup');
+    $page = $admin->handle(admin_req('GET', 'profile', [], HTML))->body;
+    contains($page, '<svg');
+    contains($page, \Lou\Admin\Totp::grouped($secret));
+    $bad = $admin->handle(admin_req('POST', 'totp-enable', ['code' => '000000'], HTML))->body;
+    contains($bad, 'That code is not right.');
+    $r = $admin->handle(admin_req('POST', 'totp-enable', ['code' => \Lou\Admin\Totp::code($secret, intdiv($now, 30))], HTML));
+    check($r->status === 303, $r->body);
+    $page = $admin->handle(admin_req('GET', 'profile', [], HTML))->body;
+    check((bool) preg_match('#<pre class="code" id="recovery-codes">([^<]+)</pre>#', $page, $m), 'recovery codes shown');
+    check(!str_contains($admin->handle(admin_req('GET', 'profile', [], HTML))->body, 'id="recovery-codes"'), 'shown once');
+    return [$secret, explode("\n", $m[1])];
+}
+
+test('totp: setup on Profile, then login asks for the code; recovery codes work once; wrong codes are rate limited', function () {
+    [, , $app] = admin_setup();
+    $now = time();
+    [$admin, $session] = users_admin($app, 'kliens', null, $now);
+    [$secret, $codes] = users_enable_totp($admin, $session, $now);
+    check(count($codes) === 10 && (new Users($app->varDir . '/users.json'))->hasTotp('kliens'), 'on, with 10 codes');
+    check(!str_contains((string) file_get_contents($app->varDir . '/users.json'), $codes[0]), 'recovery codes are hashed');
+
+    [$guest, $gs] = users_admin($app, null, null, $now + 60);
+    $r = $guest->handle(admin_req('POST', 'login', ['user' => 'kliens', 'password' => 'kliens-jelszo-12'], HTML));
+    contains($r->body, 'Two-step login');
+    check($gs->get('user') === null && $gs->get('pending')['user'] === 'kliens', 'not signed in until the code is right');
+    check($guest->handle(admin_req('GET', 'dashboard', [], HTML))->status === 303, 'the admin stays closed');
+    check($guest->handle(admin_req('POST', 'login-code', ['code' => '000000'], HTML))->status === 401, 'wrong code');
+    $r = $guest->handle(admin_req('POST', 'login-code', ['code' => \Lou\Admin\Totp::code($secret, intdiv($now + 60, 30))], HTML));
+    check($r->status === 303 && $gs->get('user') === 'kliens', $r->body);
+
+    // the same code can't be used again, a recovery code works once
+    [$g2, $gs2] = users_admin($app, null, null, $now + 60);
+    $g2->handle(admin_req('POST', 'login', ['user' => 'kliens', 'password' => 'kliens-jelszo-12'], HTML));
+    check($g2->handle(admin_req('POST', 'login-code', ['code' => \Lou\Admin\Totp::code($secret, intdiv($now + 60, 30))], HTML))->status === 401, 'no replay');
+    check($g2->handle(admin_req('POST', 'login-code', ['code' => strtoupper($codes[3])], HTML))->status === 303 && $gs2->get('user') === 'kliens', 'recovery code');
+    check((new Users($app->varDir . '/users.json'))->recoveryLeft('kliens') === 9, 'used up');
+    [$g3] = users_admin($app, null, null, $now + 60);
+    $g3->handle(admin_req('POST', 'login', ['user' => 'kliens', 'password' => 'kliens-jelszo-12'], HTML));
+    check($g3->handle(admin_req('POST', 'login-code', ['code' => $codes[3]], HTML))->status === 401, 'a recovery code works once');
+
+    // the pending step expires after five minutes
+    [$g4] = users_admin($app, null, null, $now);
+    $g4->handle(admin_req('POST', 'login', ['user' => 'kliens', 'password' => 'kliens-jelszo-12'], HTML));
+    [$late] = [new AdminApp($app, new Database($app->databaseFile()), (fn () => $this->session)->call($g4), $now + 301)];
+    contains($late->handle(admin_req('POST', 'login-code', ['code' => $codes[5]], HTML))->body, 'That took too long.');
+
+    // a password reset link does not skip the code
+    $token = (new Users($app->varDir . '/users.json'))->link('kliens', 'reset', 'bence', $now, Users::INVITE_TTL);
+    [$g5, $gs5] = users_admin($app, null, null, $now);
+    $r = $g5->handle(admin_req('POST', 'welcome', ['t' => $token, 'password' => 'uj kliens jelszo', 'password2' => 'uj kliens jelszo'], HTML));
+    check($r->status === 200 && $gs5->get('user') === null && $gs5->get('pending')['user'] === 'kliens', 'reset link still asks for the code');
+
+    // turning it off needs the password
+    [$k] = users_admin($app, 'kliens', null, $now);
+    contains($k->handle(admin_req('POST', 'totp-disable', ['password' => 'wrong'], HTML))->body, 'The current password is wrong.');
+    check($k->handle(admin_req('POST', 'totp-disable', ['password' => 'uj kliens jelszo'], HTML))->status === 303, 'off');
+    check(!(new Users($app->varDir . '/users.json'))->hasTotp('kliens'), 'off');
+});
+
+test('totp: admins can require it for everyone (after turning it on themselves) and reset it for a lost phone', function () {
+    [, , $app] = admin_setup();
+    $now = time();
+    [$admin, $session] = users_admin($app, 'bence', null, $now);
+    contains($admin->handle(admin_req('POST', 'users-2fa-policy', ['require_2fa' => '1'], HTML))->body, 'Turn on two-step login for yourself first');
+    users_enable_totp($admin, $session, $now);
+    check($admin->handle(admin_req('POST', 'users-2fa-policy', ['require_2fa' => '1'], HTML))->status === 303, 'required');
+    check((new App($app->root))->settings()['require_2fa'] === true, 'stored in var/settings.json');
+
+    // someone without it can only set it up
+    [$kliens, $ks] = users_admin($app, 'kliens', null, $now);
+    $r = $kliens->handle(admin_req('GET', 'pages', [], HTML));
+    check($r->status === 303 && str_contains((string) ($r->headers['Location'] ?? ''), 'r=profile'), 'sent to Profile');
+    check($kliens->handle(admin_req('POST', 'save', ['page' => 'about', 'lang' => 'hu', 'field' => 'title', 'type' => 'text', 'value' => 'x']))->status === 403, 'no edits');
+    contains($kliens->handle(admin_req('GET', 'profile', [], HTML))->body, 'This site requires two-step login.');
+    users_enable_totp($kliens, $ks, $now);
+    check($kliens->handle(admin_req('GET', 'pages', [], HTML))->status === 200, 'free to work once set up');
+    contains($kliens->handle(admin_req('POST', 'totp-disable', ['password' => 'kliens-jelszo-12'], HTML))->body, 'it can’t be turned off');
+
+    // site/config.php (which an assistant's draft can change) can't switch the requirement off
+    file_put_contents("$app->root/site/config.php", str_replace("'base_url'", "'require_2fa' => false,\n    'base_url'", (string) file_get_contents("$app->root/site/config.php")));
+    check((new App($app->root))->config['require_2fa'] === true, 'the server setting wins over site/config.php');
+    check($kliens->handle(admin_req('GET', 'pages', [], HTML))->status === 200, 'still allowed (has 2FA)');
+
+    // lost phone: the admin resets it, the user is signed out
+    check($admin->handle(admin_req('POST', 'user-2fa-reset', ['name' => 'kliens'], HTML))->status === 303, 'reset');
+    check(!(new Users($app->varDir . '/users.json'))->hasTotp('kliens'), 'off');
+    check($kliens->handle(admin_req('GET', 'pages', [], HTML))->status === 303 && $ks->get('user') === null, 'signed out');
+    $list = $admin->handle(admin_req('GET', 'users', [], HTML))->body;
+    contains($list, 'name="require_2fa" value="1" checked');
+    contains($list, '<span class="badge">on</span>');
+});
+
+test('users: assistants live under Users as a tab', function () {
+    [$admin] = admin_setup();
+    $page = $admin->handle(admin_req('GET', 'assistants', [], HTML))->body;
+    contains($page, '<nav class="tabs"');
+    check(!str_contains($page, '?r=assistants"><svg'), 'no separate Assistants menu item');
+    check((bool) preg_match('#\?r=users" aria-current="page"><svg#', $page), 'Users is the current menu item on the assistants tab');
+    contains($admin->handle(admin_req('GET', 'users', [], HTML))->body, 'Manage assistants');
+});

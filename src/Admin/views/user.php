@@ -44,6 +44,13 @@ $hidden = '<input type="hidden" name="_csrf" value="' . $e($csrf) . '"><input ty
     <button class="btn" type="submit"><?= $invited ? $t('Send a new invite') : $t('Send a password reset link') ?></button>
     <span class="muted"><?= $invited ? $t('The old invite link stops working.') : $t('They choose a new password with it. The current password keeps working until then.') ?></span>
   </form>
+  <?php if (isset($record['totp'])): ?>
+  <form method="post" action="<?= $self ?>?r=user-2fa-reset" class="actions" data-confirm="<?= $t('Reset two-step login for {name}? They are signed out and log in with only their password until they set it up again.', ['name' => $name]) ?>">
+    <?= $hidden ?>
+    <button class="btn" type="submit"><?= $t('Reset two-step login') ?></button>
+    <span class="muted"><?= $t('Two-step login is on ({n} recovery codes left). Reset it if they lost their phone.', ['n' => $recoveryLeft]) ?></span>
+  </form>
+  <?php endif ?>
   <?php if (!$invited): ?>
   <form method="post" action="<?= $self ?>?r=user-signout" class="actions">
     <?= $hidden ?>

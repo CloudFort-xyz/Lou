@@ -12,6 +12,10 @@ $sampleAt = (new DateTimeImmutable('@' . $sample))->setTimezone(new DateTimeZone
 ?>
 <div class="page-head"><h1><?= $t('Profile') ?></h1><span class="muted"><?= $e($user) ?> · <?= $e($roleName($role)) ?></span></div>
 
+<?php if ($totpRequired && !$totpOn): ?>
+  <div class="notice notice-warn"><strong><?= $t('This site requires two-step login.') ?></strong> <a href="#two-step"><?= $t('Set it up below') ?></a> <?= $t('to use the rest of the admin.') ?></div>
+<?php endif ?>
+
 <section class="widget settings-section">
   <h2><?= $t('Preferences') ?></h2>
   <p class="muted"><?= $t('These apply only to you, on every device you sign in on.') ?></p>
@@ -58,6 +62,8 @@ $sampleAt = (new DateTimeImmutable('@' . $sample))->setTimezone(new DateTimeZone
     <p><button class="btn btn-primary" type="submit"><?= $t('Save preferences') ?></button></p>
   </form>
 </section>
+
+<?php require __DIR__ . '/_two-step.php' ?>
 
 <section class="widget settings-section" id="password">
   <h2><?= $t('Change password') ?></h2>

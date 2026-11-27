@@ -213,6 +213,98 @@ final class Users
         });
     }
 
+    // ------------------------------------------------------------------ two-step login (TOTP)
+
+    public function hasTotp(string $name): bool
+    {
+        return isset($this->get($name)['totp']['secret']);
+    }
+
+    /**
+     * Turn on two-step login with a secret the user's app has proven it knows (the code for $step was right).
+     *
+     * @return list<string> the recovery codes, shown once (only hashes are kept)
+     */
+    public function enableTotp(string $name, string $secret, int $step, int $now): array
+    {
+        $codes = self::newRecoveryCodes();
+        $this->update($name, function (array $u) use ($secret, $step, $now, $codes): array {
+            $u['totp'] = ['secret' => $secret, 'since' => gmdate('c', $now), 'step' => $step];
+            $u['recovery'] = array_map(self::recoveryHash(...), $codes);
+            return $u;
+        });
+        return $codes;
+    }
+
+    /** @return list<string> new recovery codes; the old ones stop working */
+    public function renewRecoveryCodes(string $name): array
+    {
+        $codes = self::newRecoveryCodes();
+        $this->update($name, fn (array $u): array => ['recovery' => array_map(self::recoveryHash(...), $codes)] + $u);
+        return $codes;
+    }
+
+    public function recoveryLeft(string $name): int
+    {
+        return count($this->get($name)['recovery'] ?? []);
+    }
+
+    public function disableTotp(string $name): void
+    {
+        $this->update($name, function (array $u): array {
+            unset($u['totp'], $u['recovery']);
+            return $u;
+        });
+    }
+
+    /**
+     * Check the second step of a login: a code from the app (each one works once) or a recovery code (each one works
+     * once). @return string|null 'app' or 'recovery' on success
+     */
+    public function verifySecondFactor(string $name, string $code, int $now): ?string
+    {
+        $u = $this->get($name);
+        if (!isset($u['totp']['secret'])) {
+            return null;
+        }
+        $step = Totp::verify($u['totp']['secret'], $code, $now, (int) ($u['totp']['step'] ?? -1));
+        if ($step !== null) {
+            $this->update($name, function (array $u) use ($step): array {
+                $u['totp']['step'] = $step;
+                return $u;
+            });
+            return 'app';
+        }
+        $hash = self::recoveryHash($code);
+        foreach ($u['recovery'] ?? [] as $i => $h) {
+            if (hash_equals($h, $hash)) {
+                $this->update($name, function (array $u) use ($i): array {
+                    unset($u['recovery'][$i]);
+                    $u['recovery'] = array_values($u['recovery']);
+                    return $u;
+                });
+                return 'recovery';
+            }
+        }
+        return null;
+    }
+
+    /** @return list<string> ten codes like 4f2a9-c81b0 (40 random bits each) */
+    private static function newRecoveryCodes(): array
+    {
+        $codes = [];
+        for ($i = 0; $i < 10; $i++) {
+            $hex = bin2hex(random_bytes(5));
+            $codes[] = substr($hex, 0, 5) . '-' . substr($hex, 5);
+        }
+        return $codes;
+    }
+
+    private static function recoveryHash(string $code): string
+    {
+        return hash('sha256', strtolower((string) preg_replace('/[^0-9a-f]/i', '', $code)));
+    }
+
     public function prefs(string $name): Prefs
     {
         return Prefs::fromArray((array) ($this->all()[strtolower($name)]['prefs'] ?? []));

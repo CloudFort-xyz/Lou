@@ -259,6 +259,12 @@ try {
                 $token = $users->invite($name, is_string($opt['email'] ?? null) ? $opt['email'] : '', is_string($opt['role'] ?? null) ? $opt['role'] : 'editor', 'cli', time());
                 echo "User $name invited. Send them this link (it works once, for 48 hours):\n"
                     . $app->siteUrl() . $app->endpoint('admin.php') . "?r=welcome&t=$token\n";
+            } elseif ($sub === '2fa-reset') {
+                // for a lost phone: they log in with the password only and set it up again
+                $name = $pos[2] ?? throw new LouException('Usage: php lou user 2fa-reset NAME');
+                $users->disableTotp($name);
+                $users->bumpSessions($name);
+                echo "Two-step login turned off for $name, and every session of theirs has ended\n";
             } elseif ($sub === 'signout') {
                 $users->bumpSessions($pos[2] ?? throw new LouException('Usage: php lou user signout NAME'));
                 echo "Every session of {$pos[2]} has ended\n";
@@ -266,7 +272,7 @@ try {
                 $users->remove($pos[2] ?? throw new LouException('Usage: php lou user remove NAME'));
                 echo "User removed\n";
             } else {
-                throw new LouException('Usage: php lou user list|add|invite|signout|remove');
+                throw new LouException('Usage: php lou user list|add|invite|signout|2fa-reset|remove');
             }
             break;
 
@@ -365,7 +371,7 @@ try {
               retry                           Re-run failed actions (email, newsletter, webhook) of stored submissions
               submissions [--form=ID]         Export submissions as CSV to stdout
               user list|add NAME [--role=admin|editor|contributor] [--email=…] [--lang=hu]
-              user invite NAME --email=… [--role=…]|signout NAME|remove NAME
+              user invite NAME --email=… [--role=…]|signout NAME|2fa-reset NAME|remove NAME
                                               Manage admin users (add prompts for the password;
                                               invite prints a link where they choose one;
                                               --lang sets their admin language, see Profile)

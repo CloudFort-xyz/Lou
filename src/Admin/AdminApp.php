@@ -28,6 +28,7 @@ use Lou\Setup\Updater;
 use Lou\Support\Fs;
 use Lou\Support\Git;
 use Lou\Support\Html;
+use Lou\Support\QrCode;
 
 /**
  * The admin at /<endpoint_dir>/admin.php. Routes by ?r=…; GET renders pages, POST changes things
@@ -60,6 +61,11 @@ final class AdminApp
         'POST forgot'         => null,
         'GET welcome'         => null,
         'POST welcome'        => null,
+        'POST login-code'     => null,
+        'POST totp-start'     => 'contributor',
+        'POST totp-enable'    => 'contributor',
+        'POST totp-disable'   => 'contributor',
+        'POST totp-recovery'  => 'contributor',
         'POST logout'         => 'contributor',
         'GET profile'         => 'contributor',
         'POST profile'        => 'contributor',
@@ -127,6 +133,8 @@ final class AdminApp
         'POST user-link'      => 'admin',
         'POST user-signout'   => 'admin',
         'POST user-remove'    => 'admin',
+        'POST user-2fa-reset' => 'admin',
+        'POST users-2fa-policy' => 'admin',
     ];
 
     private Request $req;
@@ -169,9 +177,14 @@ final class AdminApp
             if (!Users::atLeast($this->role(), $need)) {
                 return $this->deny();
             }
+            // when the site requires two-step login, people without it can only set it up (or log out)
+            if ($this->mustSetUpTotp() && !in_array($key, ['GET profile', 'POST totp-start', 'POST totp-enable', 'POST logout'], true)) {
+                return $req->wantsJson() ? Response::json(403, ['ok' => false, 'message' => $this->tr('Set up two-step login on your Profile page first.')])
+                    : Response::redirect($this->self() . '?r=profile');
+            }
         }
         if ($req->method === 'POST') {
-            if (!$this->sameOrigin() || (!in_array($route, ['login', 'forgot', 'welcome'], true) && !hash_equals($this->csrf(), $req->input('_csrf') ?: $req->header('x-lou-csrf')))) {
+            if (!$this->sameOrigin() || (!in_array($route, ['login', 'forgot', 'welcome', 'login-code'], true) && !hash_equals($this->csrf(), $req->input('_csrf') ?: $req->header('x-lou-csrf')))) {
                 return $req->wantsJson() ? Response::json(403, ['ok' => false, 'message' => $this->tr('Security check failed, reload the page')]) : $this->deny();
             }
         }
@@ -212,17 +225,75 @@ final class AdminApp
             $this->db->audit('admin', 'login-failed', null, mb_substr($name, 0, 64));
             return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('Wrong user name or password.')], 401);
         }
+        if ($this->users()->hasTotp($name)) {
+            return $this->askForCode($name);
+        }
+        return $this->signIn($name);
+    }
+
+    /** Start a session for a user whose password (and code, if they use two-step login) was right. */
+    private function signIn(string $name, ?string $flash = null): Response
+    {
+        $name = strtolower($name);
+        $t = $this->time();
+        $users = $this->users();
         $this->session->regenerate();
-        $this->session->set('user', strtolower($name));
-        $this->session->set('role', $role);
-        $this->session->set('sv', $this->users()->sessionVersion($name));
-        $this->session->set('started', $t);
-        $this->session->set('seen', $t);
-        $this->session->set('csrf', bin2hex(random_bytes(32)));
-        $this->users()->touchLogin($name, $t);
-        $this->db->audit('admin', 'login', null, strtolower($name));
-        $start = $this->users()->prefs($name)->startPage;
+        foreach (['pending' => null, 'user' => $name, 'role' => $users->role($name), 'sv' => $users->sessionVersion($name), 'started' => $t, 'seen' => $t,
+            'csrf' => bin2hex(random_bytes(32))] as $k => $v) {
+            $this->session->set($k, $v);
+        }
+        $users->touchLogin($name, $t);
+        $this->db->audit('admin', 'login', null, $name);
+        if ($flash !== null) {
+            return $this->done('dashboard', $flash);
+        }
+        $start = $users->prefs($name)->startPage;
         return Response::redirect($this->self() . ($start !== '' ? "?r=$start" : ''));
+    }
+
+    /** The password was right: remember that for five minutes (not signed in yet) and ask for the app's code. */
+    private function askForCode(string $name, ?string $error = null, int $status = 200): Response
+    {
+        if ($error === null) {
+            $this->session->regenerate();
+            $this->session->set('pending', ['user' => strtolower($name), 'at' => $this->time()]);
+        }
+        return $this->page($this->tr('Two-step login'), 'login-code', ['error' => $error], $status);
+    }
+
+    private function rPostLoginCode(): Response
+    {
+        $pending = $this->session->get('pending');
+        if (!is_array($pending) || $this->time() - (int) $pending['at'] > 300 || $this->users()->get((string) $pending['user']) === null) {
+            $this->session->set('pending', null);
+            return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('That took too long. Log in again.')], 401);
+        }
+        $name = (string) $pending['user'];
+        $ipKey = 'login|' . substr(hash('sha256', $this->req->ip), 0, 32);
+        $accountKey = 'login-user|' . substr(hash('sha256', $name), 0, 32);
+        if ($this->hits($ipKey) >= self::LOGIN_FAILURES || $this->hits($accountKey) >= self::ACCOUNT_FAILURES) {
+            $this->session->set('pending', null);
+            return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('Too many attempts. Try again in an hour.')], 429);
+        }
+        $how = $this->users()->verifySecondFactor($name, $this->req->input('code'), $this->time());
+        if ($how === null) {
+            $t = $this->time();
+            $this->db->run('INSERT INTO rate_limits (key, ts) VALUES (?, ?), (?, ?)', [$ipKey, $t, $accountKey, $t]);
+            $this->db->audit('admin', 'login-code-failed', null, $name);
+            return $this->askForCode($name, $this->tr('That code is not right. Codes change every 30 seconds: use the one your app shows now.'), 401);
+        }
+        if ($how === 'recovery') {
+            $this->db->audit('admin', 'login-recovery-code', $this->users()->recoveryLeft($name) . ' left', $name);
+            return $this->signIn($name, $this->tr('You used a recovery code. {n} left: make new ones on your Profile page if you are running low.', ['n' => $this->users()->recoveryLeft($name)]));
+        }
+        return $this->signIn($name);
+    }
+
+    /** True when the site requires two-step login and the signed-in user hasn't set it up yet. */
+    private function mustSetUpTotp(): bool
+    {
+        $user = $this->session->get('user');
+        return !empty($this->app->settings()['require_2fa']) && is_string($user) && !$this->users()->hasTotp($user);
     }
 
     /** Rate-limit entries for a key within the last LOGIN_WINDOW seconds. */
@@ -290,15 +361,11 @@ final class AdminApp
             return $fail($this->tr($e->getMessage()));
         }
         $this->db->audit('admin', $purpose === 'invite' ? 'invite-accepted' : 'password-reset', null, $name);
-        // sign in straight away: the link proved who they are
-        $this->session->regenerate();
-        $t = $this->time();
-        foreach (['user' => $name, 'role' => $users->role($name), 'sv' => $users->sessionVersion($name), 'started' => $t, 'seen' => $t,
-            'csrf' => bin2hex(random_bytes(32))] as $k => $v) {
-            $this->session->set($k, $v);
+        // the link proves the email address, not the phone: with two-step login on, the app's code is still needed
+        if ($users->hasTotp($name)) {
+            return $this->askForCode($name);
         }
-        $users->touchLogin($name, $t);
-        return $this->done('dashboard', $this->tr('Your password is set. You are signed in.'));
+        return $this->signIn($name, $this->tr('Your password is set. You are signed in.'));
     }
 
     /** The full URL of an invite or reset link. */
@@ -340,7 +407,7 @@ final class AdminApp
 
     // ---------------------------------------------------------------- profile (every user, their own)
 
-    private function rGetProfile(): Response
+    private function rGetProfile(array $extra = []): Response
     {
         $site = Site::load($this->app);
         return $this->page($this->tr('Profile'), 'profile', [
@@ -352,7 +419,80 @@ final class AdminApp
             'timezones'     => \DateTimeZone::listIdentifiers(),
             'formats'       => Prefs::DATE_FORMATS,
             'sample'        => $this->time(),
-        ]);
+        ] + $extra + $this->totpState() + ['totpError' => null]);
+    }
+
+    /** What the Profile page's two-step login section shows. */
+    private function totpState(): array
+    {
+        $me = (string) $this->session->get('user');
+        $users = $this->users();
+        $setup = $this->session->get('totp_setup');
+        $codes = $this->session->get('new_recovery');
+        $this->session->set('new_recovery', null);
+        $uri = is_string($setup) ? Totp::uri($setup, $me, (string) $this->app->config['name']) : null;
+        return [
+            'totpOn'       => $users->hasTotp($me),
+            'totpSince'    => (string) ($users->get($me)['totp']['since'] ?? ''),
+            'totpRequired' => !empty($this->app->settings()['require_2fa']),
+            'recoveryLeft' => $users->recoveryLeft($me),
+            'totpSecret'   => is_string($setup) ? Totp::grouped($setup) : null,
+            'totpUri'      => $uri,
+            'totpQr'       => $uri !== null ? QrCode::encode($uri)->svg(220, $this->tr('QR code for your authenticator app')) : null,
+            'newRecovery'  => is_array($codes) ? $codes : null,
+        ];
+    }
+
+    /** Step 1: a new secret, kept in the session until the app proves it has it. */
+    private function rPostTotpStart(): Response
+    {
+        $this->session->set('totp_setup', Totp::newSecret());
+        return Response::redirect($this->self() . '?r=profile#two-step');
+    }
+
+    /** Step 2: the code from the app is right, so two-step login is on. Recovery codes are shown once. */
+    private function rPostTotpEnable(): Response
+    {
+        $me = (string) $this->user();
+        $secret = $this->session->get('totp_setup');
+        if (!is_string($secret)) {
+            throw new LouException($this->tr('Start the setup again.'));
+        }
+        $step = Totp::verify($secret, $this->req->input('code'), $this->time());
+        if ($step === null) {
+            return $this->rGetProfile(['totpError' => $this->tr('That code is not right. Check that the time on your phone is set automatically, and type the code your app shows now.')]);
+        }
+        $codes = $this->users()->enableTotp($me, $secret, $step, $this->time());
+        $this->session->set('totp_setup', null);
+        $this->session->set('new_recovery', $codes);
+        $this->db->audit('admin', '2fa-on', null, $me);
+        return $this->done('profile#two-step', $this->tr('Two-step login is on. From now on you need your app’s code after your password.'));
+    }
+
+    /** Turning it off (or making new recovery codes) needs the password, so a borrowed session can't do it. */
+    private function rPostTotpDisable(): Response
+    {
+        $me = (string) $this->user();
+        if (!empty($this->app->settings()['require_2fa'])) {
+            throw new LouException($this->tr('Two-step login is required on this site, so it can’t be turned off.'));
+        }
+        if ($this->users()->verify($me, $this->req->input('password')) === null) {
+            throw new LouException($this->tr('The current password is wrong.'));
+        }
+        $this->users()->disableTotp($me);
+        $this->db->audit('admin', '2fa-off', null, $me);
+        return $this->done('profile#two-step', $this->tr('Two-step login is off.'));
+    }
+
+    private function rPostTotpRecovery(): Response
+    {
+        $me = (string) $this->user();
+        if ($this->users()->verify($me, $this->req->input('password')) === null) {
+            throw new LouException($this->tr('The current password is wrong.'));
+        }
+        $this->session->set('new_recovery', $this->users()->renewRecoveryCodes($me));
+        $this->db->audit('admin', '2fa-recovery-codes', null, $me);
+        return $this->done('profile#two-step', $this->tr('New recovery codes are ready. The old ones no longer work.'));
     }
 
     private function rPostProfile(): Response
@@ -1518,7 +1658,37 @@ final class AdminApp
             'newLink' => $this->takeNewLink(),
             'roles'   => Users::ROLES,
             'now'     => $this->time(),
+            'require2fa' => !empty($this->app->settings()['require_2fa']),
+            'assistantCount' => count($this->tokens()->all()),
         ]);
+    }
+
+    /** Require two-step login for everyone (or not). Admins turn it on for themselves first, so they can't lock themselves out. */
+    private function rPostUsers2faPolicy(): Response
+    {
+        $on = $this->req->input('require_2fa') === '1';
+        if ($on && !$this->users()->hasTotp((string) $this->user())) {
+            throw new LouException($this->tr('Turn on two-step login for yourself first, on your Profile page.'));
+        }
+        $settings = $this->app->settings();
+        $settings['require_2fa'] = $on;
+        Fs::writeJson($this->app->varDir . '/settings.json', $settings);
+        $this->db->audit('admin', 'settings', 'require_2fa ' . ($on ? 'on' : 'off'), $this->user());
+        return $this->done('users', $on ? $this->tr('Two-step login is now required. People without it set it up the next time they open the admin.')
+            : $this->tr('Two-step login is optional again.'));
+    }
+
+    /** For a lost phone: turn off someone's two-step login and sign them out. They set it up again after logging in. */
+    private function rPostUser2faReset(): Response
+    {
+        $name = strtolower($this->req->input('name'));
+        $this->users()->disableTotp($name);
+        $this->users()->bumpSessions($name);
+        if ($name === $this->user()) {
+            $this->session->set('sv', $this->users()->sessionVersion($name));
+        }
+        $this->db->audit('admin', 'user-2fa-reset', $name, $this->user());
+        return $this->done('user&name=' . rawurlencode($name), $this->tr('Two-step login was turned off for {name}. They can set it up again on their Profile page.', ['name' => $name]));
     }
 
     /** Invite someone: they get an email with a link to choose their own password. Nobody else ever knows it. */
@@ -1544,6 +1714,7 @@ final class AdminApp
             'me'       => (string) $this->user(),
             'roles'    => Users::ROLES,
             'lastAdmin' => $record['role'] === 'admin' && $this->users()->adminCount() <= 1,
+            'recoveryLeft' => $this->users()->recoveryLeft($name),
             'newLink'  => $this->takeNewLink(),
             'activity' => $this->db->run("SELECT at, source, action, detail FROM audit_log WHERE actor = ? ORDER BY id DESC LIMIT 25", [$name])->fetchAll(),
             'now'      => $this->time(),

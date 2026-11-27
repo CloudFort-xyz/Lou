@@ -13,7 +13,7 @@ See [docs/SPEC.md](docs/SPEC.md) for the full design.
 - Milestone 1 (skeleton): a multilingual static builder, the template helper, automatic redirects, single-file backups and the CLI.
 - Milestone 3 (admin): `/_lou/admin.php` with login, click-to-edit text, rich text and images in a live preview, page settings, publish, shareable preview links, submissions/subscribers, redirects, builds and rollback, and backups.
 - Milestone 2 (forms): one submit endpoint for all forms, SQLite storage, SMTP via bundled PHPMailer, Mailchimp/MailerLite/webhook newsletter sign-ups, webhooks, layered spam protection with optional Turnstile/reCAPTCHA, and progressive-enhancement JS.
-- Milestone 4 (LLM bridge): an MCP server at `/_lou/mcp.php` (plus a REST/OpenAPI fallback) that lets any assistant edit a staged copy of `site/`, build a private preview and submit it. Its changes land on staging for review. Tokens and connection snippets live under **Assistants**.
+- Milestone 4 (LLM bridge): an MCP server at `/_lou/mcp.php` (plus a REST/OpenAPI fallback) that lets any assistant edit a staged copy of `site/`, build a private preview and submit it. Its changes land on staging for review. Tokens and connection snippets live under **Users → AI assistants**.
 
 ## Install
 
@@ -35,7 +35,7 @@ php lou backup          # single-file backup into var/backups/
 php lou restore FILE    # restore a backup (the current state is backed up first)
 php lou submissions     # export form submissions as CSV
 php lou retry           # re-run failed email/newsletter/webhook actions
-php lou token add NAME  # bridge token for an assistant (or create one under Admin → Assistants)
+php lou token add NAME  # bridge token for an assistant (or create one under Admin → Users → AI assistants)
 php tests/run.php       # run the tests
 ```
 
@@ -70,7 +70,7 @@ To show a client your edits as you make them, use **Create a live viewer link** 
 
 ## Connecting an assistant
 
-Create a token under **Admin → Assistants**. The page shows ready-to-paste snippets. For Claude Code:
+Create a token under **Admin → Users → AI assistants**. The page shows ready-to-paste snippets. For Claude Code:
 
 ```sh
 claude mcp add --transport http lou https://example.com/_lou/mcp.php --header "Authorization: Bearer lou_…"

@@ -12,8 +12,8 @@ $menu = [
     ['submissions', $t->plain('Submissions'), 'inbox', 'editor', 'submission'],
     ['subscribers', $t->plain('Subscribers'), 'mail', 'editor'],
     '-',
-    ['users', $t->plain('Users'), 'users', 'admin', 'user'],
-    ['assistants', $t->plain('Assistants'), 'spark', 'admin'],
+    // assistants are listed under Users: they are the site's other editors
+    ['users', $t->plain('Users'), 'users', 'admin', ['user', 'assistants']],
     ['redirects', $t->plain('Redirects'), 'shuffle', 'admin'],
     ['builds', $t->plain('Builds'), 'layers', 'admin'],
     ['backups', $t->plain('Backups'), 'archive', 'admin'],
@@ -80,7 +80,7 @@ $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
       [$r, $label, $icon, $need] = $item;
       if (!Lou\Admin\Users::atLeast($role, $need)) continue;
       $prefix = $item[4] ?? null;
-      $current = $prefix !== null ? str_starts_with($route, $prefix) : $route === $r;
+      $current = $prefix !== null ? (bool) array_filter((array) $prefix, static fn (string $p): bool => str_starts_with($route, $p)) : $route === $r;
       $count = (int) ($item[5] ?? 0); ?>
     <li><a href="<?= $self ?>?r=<?= $r ?>"<?= $current ? ' aria-current="page"' : '' ?>><?= $svg($icon) ?><span><?= $e($label) ?></span><?php if ($count): ?><span class="count" title="<?= $t('{n} staged', ['n' => $count]) ?>"><?= $count ?></span><?php endif ?></a></li>
   <?php endforeach ?>
