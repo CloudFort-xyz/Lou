@@ -1,6 +1,6 @@
 # Lou
 
-A static-first CMS for small corporate sites, in plain PHP 8.3. There's no framework, no Composer dependencies and no Node.
+A static-first CMS for simple websites, in plain PHP 8.3. There's no framework, no Composer dependencies and no Node.
 
 - Every public page is pre-built static HTML.
 - A few tiny PHP endpoints handle forms, the admin and the LLM bridge.
