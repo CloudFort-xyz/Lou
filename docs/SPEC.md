@@ -423,6 +423,13 @@ expiry).
   it in place: text is contenteditable, and images open an upload/replace
   dialog. Saving writes the JSON field into the person's **draft** (see
   8.1) and rebuilds their preview.
+- **Site details** (editors): a form for the shared texts every page uses,
+  per language: `content/site/<lang>.json` (company, address, contact
+  details, footer) and, behind an accordion, `content/strings/<lang>.json`
+  (labels and buttons). The page says plainly that these texts appear on
+  every page. Only existing text values change (nested one level at most,
+  e.g. `social.facebook`), as plain text, into the person's draft; Review and
+  publish work as for page edits, and a publish rebuilds every page.
 - **Repeating items:** elements marked with `$v->item()` show a small
   toolbar on hover or focus: Duplicate, move (↑↓ or ←→, picked from the
   layout), and Delete (with an inline "Delete this?" step, no browser
