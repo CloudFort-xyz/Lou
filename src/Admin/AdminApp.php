@@ -28,6 +28,7 @@ use Lou\Setup\Updater;
 use Lou\Support\Fs;
 use Lou\Support\Git;
 use Lou\Support\Html;
+use Lou\Support\QrCode;
 
 /**
  * The admin at /<endpoint_dir>/admin.php. Routes by ?r=…; GET renders pages, POST changes things
@@ -45,32 +46,46 @@ final class AdminApp
     /** Failed logins allowed per IP within LOGIN_WINDOW seconds. */
     private const LOGIN_FAILURES = 10;
     private const LOGIN_WINDOW = 3600;
+    /** Failed logins allowed per account within LOGIN_WINDOW, from any number of IPs. Never a permanent lock. */
+    private const ACCOUNT_FAILURES = 20;
+    /** "Forgot password?" requests allowed per IP, and emails per account, within LOGIN_WINDOW. */
+    private const FORGOT_PER_IP = 5;
+    private const FORGOT_PER_ACCOUNT = 3;
     private const ABSOLUTE_TIMEOUT = 43200;
 
     /** Routes and the minimum role they need (null = public). */
     private const ROUTES = [
         'GET login'           => null,
         'POST login'          => null,
-        'POST logout'         => 'editor',
-        'GET profile'         => 'editor',
-        'POST profile'        => 'editor',
-        'POST password'       => 'editor',
-        'GET dashboard'       => 'editor',
-        'GET pages'           => 'editor',
-        'GET site-details'    => 'editor',
-        'POST site-details'   => 'editor',
-        'GET edit'            => 'editor',
-        'GET meta'            => 'editor',
-        'POST save'           => 'editor',
-        'POST image'          => 'editor',
-        'POST meta'           => 'editor',
-        'POST item'           => 'editor',
-        'POST undo'           => 'editor',
-        'POST redo'           => 'editor',
-        'POST page-duplicate' => 'editor',
-        'POST page-delete'    => 'editor',
+        'GET forgot'          => null,
+        'POST forgot'         => null,
+        'GET welcome'         => null,
+        'POST welcome'        => null,
+        'POST login-code'     => null,
+        'POST totp-start'     => 'contributor',
+        'POST totp-enable'    => 'contributor',
+        'POST totp-disable'   => 'contributor',
+        'POST totp-recovery'  => 'contributor',
+        'POST logout'         => 'contributor',
+        'GET profile'         => 'contributor',
+        'POST profile'        => 'contributor',
+        'POST password'       => 'contributor',
+        'GET dashboard'       => 'contributor',
+        'GET pages'           => 'contributor',
+        'GET site-details'    => 'contributor',
+        'POST site-details'   => 'contributor',
+        'GET edit'            => 'contributor',
+        'GET meta'            => 'contributor',
+        'POST save'           => 'contributor',
+        'POST image'          => 'contributor',
+        'POST meta'           => 'contributor',
+        'POST item'           => 'contributor',
+        'POST undo'           => 'contributor',
+        'POST redo'           => 'contributor',
+        'POST page-duplicate' => 'contributor',
+        'POST page-delete'    => 'contributor',
         'POST publish'        => 'editor',
-        'POST share'          => 'editor',
+        'POST share'          => 'contributor',
         'GET submissions'     => 'editor',
         'GET submission'      => 'editor',
         'GET export'          => 'editor',
@@ -86,15 +101,15 @@ final class AdminApp
         'GET redirects'       => 'admin',
         'POST redirect'       => 'admin',
         'POST revoke'         => 'admin',
-        'POST submit'         => 'editor',
-        'POST revert'         => 'editor',
-        'GET review'          => 'editor',
-        'POST review-preview' => 'editor',
+        'POST submit'         => 'contributor',
+        'POST revert'         => 'contributor',
+        'GET review'          => 'contributor',
+        'POST review-preview' => 'contributor',
         'POST reject'         => 'editor',
         'POST staging-revert' => 'editor',
-        'GET history'         => 'editor',
-        'GET history-entry'   => 'editor',
-        'POST history-restore' => 'editor',
+        'GET history'         => 'contributor',
+        'GET history-entry'   => 'contributor',
+        'POST history-restore' => 'contributor',
         'GET assistants'      => 'admin',
         'POST token-add'      => 'admin',
         'POST token-revoke'   => 'admin',
@@ -111,6 +126,15 @@ final class AdminApp
         'POST update-unsigned' => 'admin',
         'POST rebuild'        => 'admin',
         'POST design-upload'  => 'admin',
+        'GET users'           => 'admin',
+        'GET user'            => 'admin',
+        'POST user-invite'    => 'admin',
+        'POST user-update'    => 'admin',
+        'POST user-link'      => 'admin',
+        'POST user-signout'   => 'admin',
+        'POST user-remove'    => 'admin',
+        'POST user-2fa-reset' => 'admin',
+        'POST users-2fa-policy' => 'admin',
     ];
 
     private Request $req;
@@ -150,12 +174,17 @@ final class AdminApp
                 return $req->wantsJson() ? Response::json(401, ['ok' => false, 'message' => $this->tr('Please log in again')])
                     : Response::redirect($this->self() . '?r=login');
             }
-            if ($need === 'admin' && $this->role() !== 'admin') {
+            if (!Users::atLeast($this->role(), $need)) {
                 return $this->deny();
+            }
+            // when the site requires two-step login, people without it can only set it up (or log out)
+            if ($this->mustSetUpTotp() && !in_array($key, ['GET profile', 'POST totp-start', 'POST totp-enable', 'POST logout'], true)) {
+                return $req->wantsJson() ? Response::json(403, ['ok' => false, 'message' => $this->tr('Set up two-step login on your Profile page first.')])
+                    : Response::redirect($this->self() . '?r=profile');
             }
         }
         if ($req->method === 'POST') {
-            if (!$this->sameOrigin() || ($route !== 'login' && !hash_equals($this->csrf(), $req->input('_csrf') ?: $req->header('x-lou-csrf')))) {
+            if (!$this->sameOrigin() || (!in_array($route, ['login', 'forgot', 'welcome', 'login-code'], true) && !hash_equals($this->csrf(), $req->input('_csrf') ?: $req->header('x-lou-csrf')))) {
                 return $req->wantsJson() ? Response::json(403, ['ok' => false, 'message' => $this->tr('Security check failed, reload the page')]) : $this->deny();
             }
         }
@@ -183,27 +212,191 @@ final class AdminApp
     private function rPostLogin(): Response
     {
         $ipKey = 'login|' . substr(hash('sha256', $this->req->ip), 0, 32);
+        $name = trim($this->req->input('user'));
+        // guessing one account from many IPs is limited too (the key is a hash, so the table holds no user names)
+        $accountKey = 'login-user|' . substr(hash('sha256', strtolower($name)), 0, 32);
         $t = $this->time();
-        $tries = (int) $this->db->run('SELECT COUNT(*) FROM rate_limits WHERE key = ? AND ts > ?', [$ipKey, $t - self::LOGIN_WINDOW])->fetchColumn();
-        if ($tries >= self::LOGIN_FAILURES) {
+        if ($this->hits($ipKey) >= self::LOGIN_FAILURES || $this->hits($accountKey) >= self::ACCOUNT_FAILURES) {
             return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('Too many attempts. Try again in an hour.')], 429);
         }
-        $name = trim($this->req->input('user'));
-        $role = (new Users($this->app->varDir . '/users.json'))->verify($name, $this->req->input('password'));
+        $role = $this->users()->verify($name, $this->req->input('password'));
         if ($role === null) {
-            $this->db->run('INSERT INTO rate_limits (key, ts) VALUES (?, ?)', [$ipKey, $t]);
+            $this->db->run('INSERT INTO rate_limits (key, ts) VALUES (?, ?), (?, ?)', [$ipKey, $t, $accountKey, $t]);
             $this->db->audit('admin', 'login-failed', null, mb_substr($name, 0, 64));
             return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('Wrong user name or password.')], 401);
         }
+        if ($this->users()->hasTotp($name)) {
+            return $this->askForCode($name);
+        }
+        return $this->signIn($name);
+    }
+
+    /** Start a session for a user whose password (and code, if they use two-step login) was right. */
+    private function signIn(string $name, ?string $flash = null): Response
+    {
+        $name = strtolower($name);
+        $t = $this->time();
+        $users = $this->users();
         $this->session->regenerate();
-        $this->session->set('user', strtolower($name));
-        $this->session->set('role', $role);
-        $this->session->set('started', $t);
-        $this->session->set('seen', $t);
-        $this->session->set('csrf', bin2hex(random_bytes(32)));
-        $this->db->audit('admin', 'login', null, strtolower($name));
-        $start = $this->users()->prefs($name)->startPage;
+        foreach (['pending' => null, 'user' => $name, 'role' => $users->role($name), 'sv' => $users->sessionVersion($name), 'started' => $t, 'seen' => $t,
+            'csrf' => bin2hex(random_bytes(32))] as $k => $v) {
+            $this->session->set($k, $v);
+        }
+        $users->touchLogin($name, $t);
+        $this->db->audit('admin', 'login', null, $name);
+        if ($flash !== null) {
+            return $this->done('dashboard', $flash);
+        }
+        $start = $users->prefs($name)->startPage;
         return Response::redirect($this->self() . ($start !== '' ? "?r=$start" : ''));
+    }
+
+    /** The password was right: remember that for five minutes (not signed in yet) and ask for the app's code. */
+    private function askForCode(string $name, ?string $error = null, int $status = 200): Response
+    {
+        if ($error === null) {
+            $this->session->regenerate();
+            $this->session->set('pending', ['user' => strtolower($name), 'at' => $this->time()]);
+        }
+        return $this->page($this->tr('Two-step login'), 'login-code', ['error' => $error], $status);
+    }
+
+    private function rPostLoginCode(): Response
+    {
+        $pending = $this->session->get('pending');
+        if (!is_array($pending) || $this->time() - (int) $pending['at'] > 300 || $this->users()->get((string) $pending['user']) === null) {
+            $this->session->set('pending', null);
+            return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('That took too long. Log in again.')], 401);
+        }
+        $name = (string) $pending['user'];
+        $ipKey = 'login|' . substr(hash('sha256', $this->req->ip), 0, 32);
+        $accountKey = 'login-user|' . substr(hash('sha256', $name), 0, 32);
+        if ($this->hits($ipKey) >= self::LOGIN_FAILURES || $this->hits($accountKey) >= self::ACCOUNT_FAILURES) {
+            $this->session->set('pending', null);
+            return $this->page($this->tr('Log in'), 'login', ['error' => $this->tr('Too many attempts. Try again in an hour.')], 429);
+        }
+        $how = $this->users()->verifySecondFactor($name, $this->req->input('code'), $this->time());
+        if ($how === null) {
+            $t = $this->time();
+            $this->db->run('INSERT INTO rate_limits (key, ts) VALUES (?, ?), (?, ?)', [$ipKey, $t, $accountKey, $t]);
+            $this->db->audit('admin', 'login-code-failed', null, $name);
+            return $this->askForCode($name, $this->tr('That code is not right. Codes change every 30 seconds: use the one your app shows now.'), 401);
+        }
+        if ($how === 'recovery') {
+            $this->db->audit('admin', 'login-recovery-code', $this->users()->recoveryLeft($name) . ' left', $name);
+            return $this->signIn($name, $this->tr('You used a recovery code. {n} left: make new ones on your Profile page if you are running low.', ['n' => $this->users()->recoveryLeft($name)]));
+        }
+        return $this->signIn($name);
+    }
+
+    /** True when the site requires two-step login and the signed-in user hasn't set it up yet. */
+    private function mustSetUpTotp(): bool
+    {
+        $user = $this->session->get('user');
+        return !empty($this->app->settings()['require_2fa']) && is_string($user) && !$this->users()->hasTotp($user);
+    }
+
+    /** Rate-limit entries for a key within the last LOGIN_WINDOW seconds. */
+    private function hits(string $key): int
+    {
+        return (int) $this->db->run('SELECT COUNT(*) FROM rate_limits WHERE key = ? AND ts > ?', [$key, $this->time() - self::LOGIN_WINDOW])->fetchColumn();
+    }
+
+    // ---------------------------------------------------------------- forgotten passwords and invite links (no login)
+
+    private function rGetForgot(): Response
+    {
+        return $this->page($this->tr('Forgot your password?'), 'forgot', ['sent' => false, 'error' => null]);
+    }
+
+    /**
+     * Email a one-hour link to set a new password. The answer is the same whether or not the account exists (or has
+     * an email address), so the form can't be used to find out who has an account.
+     */
+    private function rPostForgot(): Response
+    {
+        $ipKey = 'forgot|' . substr(hash('sha256', $this->req->ip), 0, 32);
+        if ($this->hits($ipKey) >= self::FORGOT_PER_IP) {
+            return $this->page($this->tr('Forgot your password?'), 'forgot', ['sent' => false, 'error' => $this->tr('Too many attempts. Try again in an hour.')], 429);
+        }
+        $t = $this->time();
+        $this->db->run('INSERT INTO rate_limits (key, ts) VALUES (?, ?)', [$ipKey, $t]);
+        $users = $this->users();
+        $name = $users->find($this->req->input('user'));
+        $email = $name !== null ? (string) ($users->get($name)['email'] ?? '') : '';
+        $accountKey = 'forgot-user|' . substr(hash('sha256', (string) $name), 0, 32);
+        if ($name !== null && $email !== '' && $this->hits($accountKey) < self::FORGOT_PER_ACCOUNT) {
+            $this->db->run('INSERT INTO rate_limits (key, ts) VALUES (?, ?)', [$accountKey, $t]);
+            $token = $users->link($name, 'reset', $name, $t, Users::FORGOT_TTL);
+            $sent = $this->sendLinkEmail($name, $email, 'reset', $token, Users::FORGOT_TTL);
+            $this->db->audit('admin', 'password-forgot', $sent ? 'link emailed' : 'email failed', $name);
+        }
+        return $this->page($this->tr('Forgot your password?'), 'forgot', ['sent' => true, 'error' => null]);
+    }
+
+    /** The page an invite or reset link opens: choose a password. */
+    private function rGetWelcome(): Response
+    {
+        $token = (string) ($this->req->query['t'] ?? '');
+        $name = $this->users()->findByToken($token, $this->time());
+        $purpose = $name !== null ? (string) ($this->users()->get($name)['link']['purpose'] ?? 'reset') : '';
+        return $this->page($purpose === 'invite' ? $this->tr('Welcome') : $this->tr('Choose a new password'), 'welcome',
+            ['token' => $token, 'name' => $name, 'purpose' => $purpose, 'error' => null], $name === null ? 410 : 200);
+    }
+
+    private function rPostWelcome(): Response
+    {
+        $token = $this->req->input('t');
+        $users = $this->users();
+        $name = $users->findByToken($token, $this->time());
+        $purpose = $name !== null ? (string) ($users->get($name)['link']['purpose'] ?? 'reset') : '';
+        $fail = fn (string $error): Response => $this->page($this->tr('Choose a new password'), 'welcome',
+            ['token' => $token, 'name' => $name, 'purpose' => $purpose, 'error' => $error], 422);
+        if ($this->req->input('password') !== $this->req->input('password2')) {
+            return $fail($this->tr('The two new passwords are not the same.'));
+        }
+        try {
+            $name = $users->setPasswordWithToken($token, $this->req->input('password'), $this->time());
+        } catch (LouException $e) {
+            return $fail($this->tr($e->getMessage()));
+        }
+        $this->db->audit('admin', $purpose === 'invite' ? 'invite-accepted' : 'password-reset', null, $name);
+        // the link proves the email address, not the phone: with two-step login on, the app's code is still needed
+        if ($users->hasTotp($name)) {
+            return $this->askForCode($name);
+        }
+        return $this->signIn($name, $this->tr('Your password is set. You are signed in.'));
+    }
+
+    /** The full URL of an invite or reset link. */
+    private function linkUrl(string $token): string
+    {
+        return rtrim($this->app->siteUrl($this->req), '/') . $this->self() . '?r=welcome&t=' . $token;
+    }
+
+    /** Email an invite or reset link. @return bool false when the email could not be sent (the caller decides what to say) */
+    private function sendLinkEmail(string $name, string $email, string $purpose, string $token, int $ttl): bool
+    {
+        $site = (string) $this->app->config['name'];
+        $url = $this->linkUrl($token);
+        $hours = intdiv($ttl, 3600);
+        // in the user's own admin language when they have one, else the site's
+        $lang = $this->users()->prefs($name)->lang ?: $this->siteAdminLanguage() ?: 'en';
+        $t = I18n::load($lang);
+        [$subject, $intro] = $purpose === 'invite'
+            ? [$t->plain('You are invited to edit {site}', ['site' => $site]),
+               $t->plain('You have been given access to edit the website {site}. Your user name is {name}. Open this link to choose your password:', ['site' => $site, 'name' => $name])]
+            : [$t->plain('Set a new password for {site}', ['site' => $site]),
+               $t->plain('Someone asked for a new password for your account {name} on {site}. Open this link to choose one:', ['site' => $site, 'name' => $name])];
+        $text = "$intro\n\n$url\n\n" . $t->plain('The link works once and expires in {n} hour.|The link works once and expires in {n} hours.', ['n' => $hours])
+            . ($purpose === 'invite' ? '' : "\n" . $t->plain('If you did not ask for this, ignore this email: your password stays the same.'));
+        try {
+            $app = new App($this->app->root);
+            ($this->integrations ?? new Integrations($app, Env::load($app)))->mailer()->send(new Message([$email], "[$site] $subject", $text));
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     private function rPostLogout(): Response
@@ -214,7 +407,7 @@ final class AdminApp
 
     // ---------------------------------------------------------------- profile (every user, their own)
 
-    private function rGetProfile(): Response
+    private function rGetProfile(array $extra = []): Response
     {
         $site = Site::load($this->app);
         return $this->page($this->tr('Profile'), 'profile', [
@@ -226,7 +419,80 @@ final class AdminApp
             'timezones'     => \DateTimeZone::listIdentifiers(),
             'formats'       => Prefs::DATE_FORMATS,
             'sample'        => $this->time(),
-        ]);
+        ] + $extra + $this->totpState() + ['totpError' => null]);
+    }
+
+    /** What the Profile page's two-step login section shows. */
+    private function totpState(): array
+    {
+        $me = (string) $this->session->get('user');
+        $users = $this->users();
+        $setup = $this->session->get('totp_setup');
+        $codes = $this->session->get('new_recovery');
+        $this->session->set('new_recovery', null);
+        $uri = is_string($setup) ? Totp::uri($setup, $me, (string) $this->app->config['name']) : null;
+        return [
+            'totpOn'       => $users->hasTotp($me),
+            'totpSince'    => (string) ($users->get($me)['totp']['since'] ?? ''),
+            'totpRequired' => !empty($this->app->settings()['require_2fa']),
+            'recoveryLeft' => $users->recoveryLeft($me),
+            'totpSecret'   => is_string($setup) ? Totp::grouped($setup) : null,
+            'totpUri'      => $uri,
+            'totpQr'       => $uri !== null ? QrCode::encode($uri)->svg(220, $this->tr('QR code for your authenticator app')) : null,
+            'newRecovery'  => is_array($codes) ? $codes : null,
+        ];
+    }
+
+    /** Step 1: a new secret, kept in the session until the app proves it has it. */
+    private function rPostTotpStart(): Response
+    {
+        $this->session->set('totp_setup', Totp::newSecret());
+        return Response::redirect($this->self() . '?r=profile#two-step');
+    }
+
+    /** Step 2: the code from the app is right, so two-step login is on. Recovery codes are shown once. */
+    private function rPostTotpEnable(): Response
+    {
+        $me = (string) $this->user();
+        $secret = $this->session->get('totp_setup');
+        if (!is_string($secret)) {
+            throw new LouException($this->tr('Start the setup again.'));
+        }
+        $step = Totp::verify($secret, $this->req->input('code'), $this->time());
+        if ($step === null) {
+            return $this->rGetProfile(['totpError' => $this->tr('That code is not right. Check that the time on your phone is set automatically, and type the code your app shows now.')]);
+        }
+        $codes = $this->users()->enableTotp($me, $secret, $step, $this->time());
+        $this->session->set('totp_setup', null);
+        $this->session->set('new_recovery', $codes);
+        $this->db->audit('admin', '2fa-on', null, $me);
+        return $this->done('profile#two-step', $this->tr('Two-step login is on. From now on you need your app’s code after your password.'));
+    }
+
+    /** Turning it off (or making new recovery codes) needs the password, so a borrowed session can't do it. */
+    private function rPostTotpDisable(): Response
+    {
+        $me = (string) $this->user();
+        if (!empty($this->app->settings()['require_2fa'])) {
+            throw new LouException($this->tr('Two-step login is required on this site, so it can’t be turned off.'));
+        }
+        if ($this->users()->verify($me, $this->req->input('password')) === null) {
+            throw new LouException($this->tr('The current password is wrong.'));
+        }
+        $this->users()->disableTotp($me);
+        $this->db->audit('admin', '2fa-off', null, $me);
+        return $this->done('profile#two-step', $this->tr('Two-step login is off.'));
+    }
+
+    private function rPostTotpRecovery(): Response
+    {
+        $me = (string) $this->user();
+        if ($this->users()->verify($me, $this->req->input('password')) === null) {
+            throw new LouException($this->tr('The current password is wrong.'));
+        }
+        $this->session->set('new_recovery', $this->users()->renewRecoveryCodes($me));
+        $this->db->audit('admin', '2fa-recovery-codes', null, $me);
+        return $this->done('profile#two-step', $this->tr('New recovery codes are ready. The old ones no longer work.'));
     }
 
     private function rPostProfile(): Response
@@ -251,8 +517,11 @@ final class AdminApp
         if ($new !== $this->req->input('new_password2')) {
             throw new LouException($this->tr('The two new passwords are not the same.'));
         }
-        $this->users()->changePassword((string) $this->user(), $this->req->input('current_password'), $new);
-        $this->db->audit('admin', 'password', null, $this->user());
+        $me = (string) $this->user();
+        $this->users()->changePassword($me, $this->req->input('current_password'), $new);
+        // other sessions of this user are signed out; this one carries on
+        $this->session->set('sv', $this->users()->sessionVersion($me));
+        $this->db->audit('admin', 'password', null, $me);
         return $this->done('profile', $this->tr('Your password was changed.'));
     }
 
@@ -309,6 +578,13 @@ final class AdminApp
             $this->session->destroy();
             return null;
         }
+        // removed users, and sessions from before a password change or "sign out everywhere", end here
+        $record = $this->users()->get($user);
+        if ($record === null || (int) ($record['sv'] ?? 0) !== (int) $this->session->get('sv', 0)) {
+            $this->session->destroy();
+            return null;
+        }
+        $this->session->set('role', $record['role']);
         $this->session->set('seen', $t);
         return $user;
     }
@@ -350,7 +626,8 @@ final class AdminApp
             'pageCount'   => count($ids),
             'submissions' => (int) $this->db->run('SELECT COUNT(*) FROM submissions')->fetchColumn(),
             'recentCount' => (int) $this->db->run('SELECT COUNT(*) FROM submissions WHERE created_at >= ?', [$since])->fetchColumn(),
-            'latest'      => $this->db->run('SELECT id, form, lang, status, created_at, data FROM submissions ORDER BY id DESC LIMIT 5')->fetchAll(),
+            'latest'      => Users::atLeast($this->role(), 'editor')
+                ? $this->db->run('SELECT id, form, lang, status, created_at, data FROM submissions ORDER BY id DESC LIMIT 5')->fetchAll() : [],
             'subscribers' => (int) $this->db->run('SELECT COUNT(*) FROM subscribers')->fetchColumn(),
             'stagingOpen' => $staging->exists(),
             'stagingSubs' => $staging->exists() ? count($staging->meta()['submissions']) : 0,
@@ -1371,6 +1648,161 @@ final class AdminApp
         return $this->done('review', $this->tr('Put {n} file into your draft. Submit it to make it live.|Put {n} files into your draft. Submit it to make it live.', ['n' => count($done)]));
     }
 
+    // ---------------------------------------------------------------- users (administrators)
+
+    private function rGetUsers(): Response
+    {
+        return $this->page($this->tr('Users'), 'users', [
+            'users'   => $this->users()->all(),
+            'me'      => (string) $this->user(),
+            'newLink' => $this->takeNewLink(),
+            'roles'   => Users::ROLES,
+            'now'     => $this->time(),
+            'require2fa' => !empty($this->app->settings()['require_2fa']),
+            'assistantCount' => count($this->tokens()->all()),
+        ]);
+    }
+
+    /** Require two-step login for everyone (or not). Admins turn it on for themselves first, so they can't lock themselves out. */
+    private function rPostUsers2faPolicy(): Response
+    {
+        $on = $this->req->input('require_2fa') === '1';
+        if ($on && !$this->users()->hasTotp((string) $this->user())) {
+            throw new LouException($this->tr('Turn on two-step login for yourself first, on your Profile page.'));
+        }
+        $settings = $this->app->settings();
+        $settings['require_2fa'] = $on;
+        Fs::writeJson($this->app->varDir . '/settings.json', $settings);
+        $this->db->audit('admin', 'settings', 'require_2fa ' . ($on ? 'on' : 'off'), $this->user());
+        return $this->done('users', $on ? $this->tr('Two-step login is now required. People without it set it up the next time they open the admin.')
+            : $this->tr('Two-step login is optional again.'));
+    }
+
+    /** For a lost phone: turn off someone's two-step login and sign them out. They set it up again after logging in. */
+    private function rPostUser2faReset(): Response
+    {
+        $name = strtolower($this->req->input('name'));
+        $this->users()->disableTotp($name);
+        $this->users()->bumpSessions($name);
+        if ($name === $this->user()) {
+            $this->session->set('sv', $this->users()->sessionVersion($name));
+        }
+        $this->db->audit('admin', 'user-2fa-reset', $name, $this->user());
+        return $this->done('user&name=' . rawurlencode($name), $this->tr('Two-step login was turned off for {name}. They can set it up again on their Profile page.', ['name' => $name]));
+    }
+
+    /** Invite someone: they get an email with a link to choose their own password. Nobody else ever knows it. */
+    private function rPostUserInvite(): Response
+    {
+        $name = strtolower(trim($this->req->input('name')));
+        $email = trim($this->req->input('email'));
+        $role = $this->req->input('role');
+        $token = $this->users()->invite($name, $email, $role, (string) $this->user(), $this->time());
+        $sent = $this->sendLinkEmail($name, $email, 'invite', $token, Users::INVITE_TTL);
+        $this->db->audit('admin', 'user-invite', "$name ($role)" . ($sent ? ', emailed' : ', email failed'), $this->user());
+        $this->keepNewLink($name, $token, 'invite', $sent ? $email : null);
+        return Response::redirect($this->self() . '?r=users');
+    }
+
+    private function rGetUser(): Response
+    {
+        $name = strtolower((string) ($this->req->query['name'] ?? ''));
+        $record = $this->users()->get($name) ?? throw new LouException($this->tr('No such user.'));
+        return $this->page($this->tr('Edit user: {name}', ['name' => $name]), 'user', [
+            'name'     => $name,
+            'record'   => $record,
+            'me'       => (string) $this->user(),
+            'roles'    => Users::ROLES,
+            'lastAdmin' => $record['role'] === 'admin' && $this->users()->adminCount() <= 1,
+            'recoveryLeft' => $this->users()->recoveryLeft($name),
+            'newLink'  => $this->takeNewLink(),
+            'activity' => $this->db->run("SELECT at, source, action, detail FROM audit_log WHERE actor = ? ORDER BY id DESC LIMIT 25", [$name])->fetchAll(),
+            'now'      => $this->time(),
+        ]);
+    }
+
+    /** Change a user's role and email address. Nobody changes their own role, so an admin can't lock themselves out. */
+    private function rPostUserUpdate(): Response
+    {
+        $name = strtolower($this->req->input('name'));
+        $users = $this->users();
+        $record = $users->get($name) ?? throw new LouException($this->tr('No such user.'));
+        $role = $this->req->input('role');
+        $changes = [];
+        if ($role !== '' && $role !== $record['role']) {
+            if ($name === $this->user()) {
+                throw new LouException($this->tr('You can’t change your own role. Ask another administrator.'));
+            }
+            $users->setRole($name, $role);
+            $changes[] = "role {$record['role']} → $role";
+        }
+        $email = trim($this->req->input('email'));
+        if ($email !== (string) ($record['email'] ?? '')) {
+            $users->setEmail($name, $email);
+            $changes[] = 'email ' . ($email !== '' ? 'changed' : 'removed');
+        }
+        if ($changes) {
+            $this->db->audit('admin', 'user-update', "$name: " . implode(', ', $changes), $this->user());
+        }
+        return $this->done('user&name=' . rawurlencode($name), $changes ? $this->tr('The changes were saved. They apply right away, even if {name} is signed in.', ['name' => $name])
+            : $this->tr('Nothing changed.'));
+    }
+
+    /** A new invite or password link for a user (emailed if they have an address, and shown once to the admin). */
+    private function rPostUserLink(): Response
+    {
+        $name = strtolower($this->req->input('name'));
+        $users = $this->users();
+        $record = $users->get($name) ?? throw new LouException($this->tr('No such user.'));
+        $purpose = $record['hash'] === '' ? 'invite' : 'reset';
+        $token = $users->link($name, $purpose, (string) $this->user(), $this->time(), Users::INVITE_TTL);
+        $email = (string) ($record['email'] ?? '');
+        $sent = $email !== '' && $this->sendLinkEmail($name, $email, $purpose, $token, Users::INVITE_TTL);
+        $this->db->audit('admin', "user-$purpose-link", $name . ($email === '' ? '' : ($sent ? ', emailed' : ', email failed')), $this->user());
+        $this->keepNewLink($name, $token, $purpose, $sent ? $email : null);
+        return Response::redirect($this->self() . '?r=user&name=' . rawurlencode($name));
+    }
+
+    /** End every session of a user (for yourself: every other one). */
+    private function rPostUserSignout(): Response
+    {
+        $name = strtolower($this->req->input('name'));
+        $me = (string) $this->user();
+        $sv = $this->users()->bumpSessions($name);
+        if ($name === $me) {
+            $this->session->set('sv', $sv);
+        }
+        $this->db->audit('admin', 'user-signout', $name, $me);
+        return $this->done('user&name=' . rawurlencode($name), $name === $me
+            ? $this->tr('You were signed out everywhere else. This browser stays signed in.')
+            : $this->tr('{name} was signed out everywhere.', ['name' => $name]));
+    }
+
+    private function rPostUserRemove(): Response
+    {
+        $name = strtolower($this->req->input('name'));
+        if ($name === $this->user()) {
+            throw new LouException($this->tr('You can’t remove yourself. Ask another administrator.'));
+        }
+        $this->users()->remove($name);
+        $this->db->audit('admin', 'user-remove', $name, $this->user());
+        return $this->done('users', $this->tr('{name} was removed and signed out.', ['name' => $name]));
+    }
+
+    /** Remember a fresh invite or reset link for the next page view only (like a new assistant token). */
+    private function keepNewLink(string $name, string $token, string $purpose, ?string $emailedTo): void
+    {
+        $this->session->set('new_link', ['name' => $name, 'url' => $this->linkUrl($token), 'purpose' => $purpose, 'emailed' => $emailedTo]);
+    }
+
+    /** @return array{name: string, url: string, purpose: string, emailed: ?string}|null */
+    private function takeNewLink(): ?array
+    {
+        $link = $this->session->get('new_link');
+        $this->session->set('new_link', null);
+        return is_array($link) ? $link : null;
+    }
+
     private function rGetAssistants(): Response
     {
         // shown once: taken out of the session on the first page view after creating it
@@ -1383,7 +1815,7 @@ final class AdminApp
 
     private function rPostTokenAdd(): Response
     {
-        $token = $this->tokens()->create($this->req->input('name'));
+        $token = $this->tokens()->create($this->req->input('name'), $this->user());
         $this->db->audit('admin', 'token-add', $this->req->input('name'), $this->user());
         $this->session->set('new_token', $token);
         return Response::redirect($this->self() . '?r=assistants');
@@ -1459,6 +1891,8 @@ final class AdminApp
             'title'       => $title,
             'user'        => $this->session->get('user'),
             'role'        => $this->role(),
+            // contributors submit, editors and admins publish (and see personal data from forms)
+            'canPublish'  => Users::atLeast($this->role(), 'editor'),
             'csrf'        => $this->csrf(),
             'self'        => $this->self(),
             'endpoint'    => $this->app->endpoint(),
@@ -1480,6 +1914,9 @@ final class AdminApp
             'uiLang'      => $t->lang,
             'datePatterns' => $prefs->patterns($t->lang),
             'time'        => static fn (string|int|null $at, bool $dateOnly = false): string => $prefs->stamp($at, $dateOnly, $t->lang),
+            'roleName'    => static fn (string $r): string => match ($r) {
+                'admin' => $t->plain('Administrator'), 'editor' => $t->plain('Editor'), 'contributor' => $t->plain('Contributor'), default => $r,
+            },
             // "user:bence" → "bence", "llm:Claude" → "Claude (assistant)"
             'who'         => static fn (string $owner): string => str_starts_with($owner, 'llm:')
                 ? $t->plain('{name} (assistant)', ['name' => substr($owner, 4)]) : (string) preg_replace('/^user:/', '', $owner),

@@ -10,7 +10,8 @@ $snippet = static function (string $id, string $text, string $label) use ($e, $t
         . '<button class="btn btn-copy" type="button" data-copy="' . $id . '" aria-label="' . $t('Copy {what}', ['what' => $label]) . '">' . $t('Copy') . '</button></div>';
 };
 ?>
-<h1><?= $t('Assistants') ?></h1>
+<h1><?= $t('Users') ?></h1>
+<?php require __DIR__ . '/_users-tabs.php' ?>
 <p class="lead"><?= $t('Let an AI assistant such as Claude or ChatGPT change your site\'s layout, design, menus and content. Nothing it does goes live by itself: its changes wait for you on the {!review} page.', ['review' => '<a href="' . $self . '?r=review">' . $t('Review') . '</a>']) ?></p>
 
 <?php if ($newToken): ?>
@@ -27,10 +28,10 @@ $snippet = static function (string $id, string $text, string $label) use ($e, $t
 <p class="muted"><?= $t('A token is the assistant\'s password to this site. Create one per assistant (or per person), so you can switch them off one by one.') ?></p>
 <?php if ($tokens): ?>
 <table class="table list">
-  <thead><tr><th><?= $t('Name') ?></th><th><?= $t('Created') ?></th><th><?= $t('Last used') ?></th><th><span class="sr"><?= $t('Actions') ?></span></th></tr></thead>
+  <thead><tr><th><?= $t('Name') ?></th><th><?= $t('Created') ?></th><th class="hide-sm"><?= $t('Created by') ?></th><th><?= $t('Last used') ?></th><th><span class="sr"><?= $t('Actions') ?></span></th></tr></thead>
   <tbody>
   <?php foreach ($tokens as $id => $tk): ?>
-    <tr><td><?= $e($tk['name']) ?></td><td><?= $time($tk['created'], true) ?></td>
+    <tr><td><?= $e($tk['name']) ?></td><td><?= $time($tk['created'], true) ?></td><td class="hide-sm"><?= isset($tk['by']) ? $e($tk['by']) : '<span class="muted">–</span>' ?></td>
       <td><?= $tk['last_used'] ? $time($tk['last_used']) : '<span class="muted">' . $t('never') . '</span>' ?></td>
       <td class="cell-actions"><form method="post" action="<?= $self ?>?r=token-revoke" data-confirm="<?= $t('Revoke “{name}”? The assistant using it loses access immediately.', ['name' => $tk['name']]) ?>">
         <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">

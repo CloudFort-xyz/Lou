@@ -45,7 +45,7 @@ final class App
         if (!is_array($site)) {
             throw new LouException("site/config.php must return an array");
         }
-        unset($site['endpoint_dir']);   // a server setting only: site content (or an assistant's draft) can't move the admin
+        unset($site['endpoint_dir'], $site['require_2fa']);   // server settings only: site content (or an assistant's draft) can't move the admin or turn off 2FA
         $settings = $this->settings();
         $config = array_replace(self::DEFAULTS, $site, $settings);
         if (isset($settings['mail'])) {
@@ -65,7 +65,7 @@ final class App
      * Install settings (var/settings.json), changed in the admin or written by the installer.
      * They belong to this server, not to the site, so they override site/config.php.
      */
-    public const SETTINGS = ['base_url', 'mail', 'output_dir', 'output_swap', 'admin_language', 'endpoint_dir'];
+    public const SETTINGS = ['base_url', 'mail', 'output_dir', 'output_swap', 'admin_language', 'endpoint_dir', 'require_2fa'];
 
     /** The mail keys the admin may set (mail.transport, mail.from, mail.from_name). */
     public const MAIL_SETTINGS = ['transport', 'from', 'from_name'];

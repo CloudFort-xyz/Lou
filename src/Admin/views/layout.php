@@ -3,23 +3,24 @@
 /** @var Lou\Admin\I18n $t */
 // Sidebar menu: [route, label, icon, roles, matches(route) or null for exact].
 $menu = [
-    ['dashboard', $t->plain('Dashboard'), 'home', 'editor'],
-    ['pages', $t->plain('Pages'), 'file', 'editor'],
-    ['site-details', $t->plain('Site details'), 'layout', 'editor'],
-    ['review', $t->plain('Review'), 'check', 'editor', null, $staged],
-    ['history', $t->plain('History'), 'clock', 'editor', 'history'],
+    ['dashboard', $t->plain('Dashboard'), 'home', 'contributor'],
+    ['pages', $t->plain('Pages'), 'file', 'contributor'],
+    ['site-details', $t->plain('Site details'), 'layout', 'contributor'],
+    ['review', $t->plain('Review'), 'check', 'contributor', null, $staged],
+    ['history', $t->plain('History'), 'clock', 'contributor', 'history'],
     '-',
     ['submissions', $t->plain('Submissions'), 'inbox', 'editor', 'submission'],
     ['subscribers', $t->plain('Subscribers'), 'mail', 'editor'],
     '-',
-    ['assistants', $t->plain('Assistants'), 'spark', 'admin'],
+    // assistants are listed under Users: they are the site's other editors
+    ['users', $t->plain('Users'), 'users', 'admin', ['user', 'assistants']],
     ['redirects', $t->plain('Redirects'), 'shuffle', 'admin'],
     ['builds', $t->plain('Builds'), 'layers', 'admin'],
     ['backups', $t->plain('Backups'), 'archive', 'admin'],
     ['updates', $t->plain('Updates'), 'download', 'admin'],
     ['settings', $t->plain('Settings'), 'gear', 'admin'],
     '-',
-    ['profile', $t->plain('Profile'), 'user', 'editor'],
+    ['profile', $t->plain('Profile'), 'user', 'contributor'],
 ];
 // Small stroke icons (24×24 viewBox), drawn with currentColor so they follow the menu colours.
 $icons = [
@@ -39,7 +40,11 @@ $icons = [
     'ext'     => '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v6H4V6h6"/>',
     'menu'    => '<path d="M4 6h16M4 12h16M4 18h16"/>',
     'user'    => '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+    'users'   => '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5c2.4.6 4 2.4 4 5.5"/>',
 ];
+// drop the items this role can't open, then separators that would end up next to each other
+$menu = array_values(array_filter($menu, static fn ($i): bool => $i === '-' || Lou\Admin\Users::atLeast($role ?? '', $i[3])));
+$menu = array_values(array_filter($menu, static fn ($i, $k): bool => $i !== '-' || ($k > 0 && $menu[$k - 1] !== '-' && isset($menu[$k + 1])), ARRAY_FILTER_USE_BOTH));
 $svg = static fn (string $name): string => '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' . $icons[$name] . '</svg>';
 $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
 ?>
@@ -62,7 +67,7 @@ $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
     <a class="topbar-status" href="<?= $self ?>?r=review"><?= $staged ? $t('{n} staged', ['n' => $staged]) : $t('Draft') ?><span class="hide-sm"><?= $staged ? ',&nbsp;' . $t('waiting to publish') : '&nbsp;' . $t('not submitted') ?></span></a>
   <?php endif ?>
   <span class="topbar-spacer"></span>
-  <a class="topbar-user" href="<?= $self ?>?r=profile" title="<?= $t('Your profile and preferences') ?>"><span class="hide-sm"><?= $t('Signed in as') ?> </span><strong><?= $e($user) ?></strong> <span class="topbar-role"><?= $role === 'admin' ? $t('admin') : $t('editor') ?></span></a>
+  <a class="topbar-user" href="<?= $self ?>?r=profile" title="<?= $t('Your profile and preferences') ?>"><span class="hide-sm"><?= $t('Signed in as') ?> </span><strong><?= $e($user) ?></strong> <span class="topbar-role"><?= $e(mb_strtolower($roleName($role))) ?></span></a>
   <form method="post" action="<?= $self ?>?r=logout" class="inline">
     <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
     <button class="topbar-btn" type="submit"><?= $t('Log out') ?></button>
@@ -73,9 +78,9 @@ $siteUrl = rtrim((string) ($baseUrl ?? ''), '/') . '/';
   <?php foreach ($menu as $item):
       if ($item === '-'): ?><li class="sep" role="separator"></li><?php continue; endif;
       [$r, $label, $icon, $need] = $item;
-      if ($need === 'admin' && $role !== 'admin') continue;
+      if (!Lou\Admin\Users::atLeast($role, $need)) continue;
       $prefix = $item[4] ?? null;
-      $current = $prefix !== null ? str_starts_with($route, $prefix) : $route === $r;
+      $current = $prefix !== null ? (bool) array_filter((array) $prefix, static fn (string $p): bool => str_starts_with($route, $p)) : $route === $r;
       $count = (int) ($item[5] ?? 0); ?>
     <li><a href="<?= $self ?>?r=<?= $r ?>"<?= $current ? ' aria-current="page"' : '' ?>><?= $svg($icon) ?><span><?= $e($label) ?></span><?php if ($count): ?><span class="count" title="<?= $t('{n} staged', ['n' => $count]) ?>"><?= $count ?></span><?php endif ?></a></li>
   <?php endforeach ?>
