@@ -57,6 +57,8 @@ final class AdminApp
         'POST password'       => 'editor',
         'GET dashboard'       => 'editor',
         'GET pages'           => 'editor',
+        'GET site-details'    => 'editor',
+        'POST site-details'   => 'editor',
         'GET edit'            => 'editor',
         'GET meta'            => 'editor',
         'POST save'           => 'editor',
@@ -394,6 +396,47 @@ final class AdminApp
             'preview' => Previews::urlPrefix($this->app, $token) . $site->path($id, $lang),
             'history' => $this->historyState($id),
         ], 200, 'edit-layout');
+    }
+
+    /** Site details: the shared texts every page uses (header, footer, contact details, labels), per language. */
+    private function rGetSiteDetails(): Response
+    {
+        $this->draft()->rebase();
+        $app = $this->draft()->app();
+        $site = Site::load($app);
+        $lang = (string) ($this->req->query['lang'] ?? $this->editLang($site));
+        if (!in_array($lang, $site->languages(), true)) {
+            $lang = $this->editLang($site);
+        }
+        $store = new ContentStore($app);
+        return $this->page($this->tr('Site details'), 'site-details', [
+            'languages' => $site->languages(),
+            'lang'      => $lang,
+            'details'   => $store->shared('site', $lang),
+            'strings'   => $store->shared('strings', $lang),
+        ]);
+    }
+
+    private function rPostSiteDetails(): Response
+    {
+        $lang = $this->req->input('lang');
+        $changed = [];
+        $this->inDraft(function (ContentStore $c) use ($lang, &$changed): void {
+            foreach (['site' => 'details', 'strings' => 'strings'] as $kind => $input) {
+                $values = $this->req->post[$input] ?? [];
+                if (is_array($values) && $values) {
+                    $changed = array_merge($changed, $c->setShared($kind, $lang, array_map('strval', $values)));
+                }
+            }
+        });
+        $this->db->audit('editor', 'site-details', "$lang " . implode(',', $changed), $this->user());
+        if ($changed) {
+            (new Previews($this->app))->rebuild('draft:' . $this->owner());
+        }
+        $this->session->set('flash', $changed
+            ? $this->tr('Saved {n} change to your draft. It shows on every page once it is published: submit it on the Review page.|Saved {n} changes to your draft. They show on every page once they are published: submit them on the Review page.', ['n' => count($changed)])
+            : $this->tr('Nothing changed.'));
+        return Response::redirect($this->self() . '?r=site-details&lang=' . rawurlencode($lang));
     }
 
     /** JSON: page meta for the settings panel (when the editor navigates inside the preview). */

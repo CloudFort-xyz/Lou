@@ -5,6 +5,7 @@
 $menu = [
     ['dashboard', $t->plain('Dashboard'), 'home', 'editor'],
     ['pages', $t->plain('Pages'), 'file', 'editor'],
+    ['site-details', $t->plain('Site details'), 'layout', 'editor'],
     ['review', $t->plain('Review'), 'check', 'editor', null, $staged],
     ['history', $t->plain('History'), 'clock', 'editor', 'history'],
     '-',
@@ -23,6 +24,7 @@ $menu = [
 // Small stroke icons (24×24 viewBox), drawn with currentColor so they follow the menu colours.
 $icons = [
     'home'    => '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
+    'layout'  => '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 8h18M3 16h18"/>',
     'file'    => '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/>',
     'check'   => '<path d="M4 12l5 5L20 6"/>',
     'clock'   => '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',

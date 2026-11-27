@@ -636,3 +636,28 @@ test('admin: a restored backup goes to Review, and unsafe backups are refused', 
     }
     check(file_get_contents($home) === $before, 'site/ still untouched');
 });
+
+test('admin: site details edit the shared texts of every page in the draft, then go live with a publish', function () {
+    [$admin, , $app] = admin_setup('editor');
+    $page = $admin->handle(admin_req('GET', 'site-details', [], ['headers' => ['accept' => 'text/html'], 'query' => ['lang' => 'en']]));
+    check($page->status === 200, 'editors can open site details');
+    contains($page->body, 'These texts appear on every page.');
+    contains($page->body, 'name="details[company]" value="Example Ltd."');
+    contains($page->body, 'name="strings[form.send]"', 'labels and buttons are editable too');
+    $r = $admin->handle(admin_req('POST', 'site-details', ['lang' => 'en', 'details' => ['company' => 'New <b>Name</b> Ltd.', 'email' => 'info@example.com'], 'strings' => ['form.send' => 'Send it']], ['headers' => ['accept' => 'text/html']]));
+    check($r->status === 303 && str_contains($r->headers['Location'], 'r=site-details&lang=en'), 'back to the form');
+    $draft = \Lou\Support\Fs::readJson(draft_site($app, 'kliens') . '/content/site/en.json');
+    check($draft['company'] === 'New Name Ltd.', 'plain text, tags stripped');
+    check(\Lou\Support\Fs::readJson(draft_site($app, 'kliens') . '/content/strings/en.json')['form.send'] === 'Send it', 'strings saved');
+    check(\Lou\Support\Fs::readJson($app->siteDir . '/content/site/en.json')['company'] === 'Example Ltd.', 'the live site is untouched until published');
+    check(\Lou\Support\Fs::readJson(draft_site($app, 'kliens') . '/content/site/hu.json') === \Lou\Support\Fs::readJson($app->siteDir . '/content/site/hu.json'), 'other languages stay as they were');
+    $r = $admin->handle(admin_req('POST', 'site-details', ['lang' => 'en', 'details' => ['new_key' => 'x']]));
+    check($r->status >= 400, 'only existing texts can change');
+    submit_and_publish($admin, $app, 'Company name');
+    $pages = array_merge(glob($app->root . '/public/en/index.html') ?: [], glob($app->root . '/public/en/*/index.html') ?: []);
+    check(count($pages) > 1, 'several English pages');
+    foreach ($pages as $html) {
+        $footer = strstr((string) file_get_contents($html), '<footer') ?: '';
+        check(str_contains($footer, 'New Name Ltd.') && !str_contains($footer, 'Example Ltd.'), "every page's footer shows the new name: $html");
+    }
+});

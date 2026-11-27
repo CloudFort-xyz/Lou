@@ -11,7 +11,8 @@ use Lou\Support\Html;
 
 /**
  * The only way the admin editor writes content. It can change values inside a page's `fields`
- * and its title/description/menu label (plus the slug for admins). Never templates or structure,
+ * and its title/description/menu label (plus the slug for admins), and the existing texts of the shared
+ * site content and strings (Site details). Never templates or structure,
  * except duplicating or deleting pages whose template the site lists in admin.repeatable (e.g. job ads).
  */
 final class ContentStore
@@ -254,6 +255,86 @@ final class ContentStore
             throw new LouException("Page '$id' is in the menu, so it can't be deleted here");
         }
         Fs::removeDir($this->app->siteDir . "/content/pages/$id");
+    }
+
+    /**
+     * Shared texts as path => value: 'site' is content/site/<lang>.json (company, address, footer…),
+     * 'strings' is content/strings/<lang>.json (labels and buttons). Only text values, nested one level at most
+     * (e.g. social.facebook); lists and deeper structures are left to assistants.
+     * @return array<string, string>
+     */
+    public function shared(string $kind, string $lang): array
+    {
+        $data = Fs::readJson($this->sharedFile($kind, $lang));
+        $out = [];
+        foreach ($data as $k => $v) {
+            if (is_string($v)) {
+                $out[(string) $k] = $v;
+            } elseif (is_array($v) && !array_is_list($v)) {
+                foreach ($v as $k2 => $v2) {
+                    if (is_string($v2)) {
+                        $out["$k.$k2"] = $v2;
+                    }
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Change shared texts (see shared()). Only values that already exist can change, and they stay plain text.
+     * @param array<string, string> $values path => new value
+     * @return list<string> the paths that changed
+     */
+    public function setShared(string $kind, string $lang, array $values): array
+    {
+        $file = $this->sharedFile($kind, $lang);
+        $original = (string) file_get_contents($file);
+        $data = Fs::readJson($file);
+        $current = $this->shared($kind, $lang);
+        $changed = [];
+        foreach ($values as $path => $value) {
+            $path = (string) $path;
+            if (!array_key_exists($path, $current)) {
+                throw new LouException("Unknown text '$path'");
+            }
+            $value = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $value)) ?? '');
+            if (mb_strlen($value) > 5000) {
+                throw new LouException('Value too long');
+            }
+            if ($value === $current[$path]) {
+                continue;
+            }
+            if (array_key_exists($path, $data)) {
+                $data[$path] = $value; // top-level key, which may itself contain dots (strings like form.send)
+            } else {
+                [$a, $b] = explode('.', $path, 2);
+                $data[$a][$b] = $value;
+            }
+            $changed[] = $path;
+        }
+        if ($changed) {
+            $this->replace($file, self::encode($data));
+            try {
+                Site::load($this->app);
+            } catch (LouException $e) {
+                $this->replace($file, $original);
+                throw $e;
+            }
+        }
+        return $changed;
+    }
+
+    private function sharedFile(string $kind, string $lang): string
+    {
+        if (!in_array($kind, ['site', 'strings'], true) || !in_array($lang, $this->app->config['languages'], true)) {
+            throw new LouException('Invalid language');
+        }
+        $file = $this->app->siteDir . "/content/$kind/$lang.json";
+        if (!is_file($file)) {
+            throw new LouException("content/$kind/$lang.json does not exist");
+        }
+        return $file;
     }
 
     private function update(string $id, string $lang, callable $fn): void

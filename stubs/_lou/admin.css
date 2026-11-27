@@ -247,3 +247,4 @@ ins{background:var(--ok-bg);color:#05603a;text-decoration:none;box-shadow:inset 
 }
 .undo-row .btn:disabled{opacity:.45;cursor:default}
 .preview-pages{flex-basis:100%;margin:0;font-size:13px}
+.lang-switch{display:flex;gap:.25rem;margin:0 0 1rem}.lang-switch a{padding:.3rem .8rem;border:1px solid var(--line);border-radius:999px;text-decoration:none;font-weight:600;font-size:.85rem}.lang-switch a[aria-current]{background:var(--accent,#2563eb);border-color:transparent;color:#fff}
