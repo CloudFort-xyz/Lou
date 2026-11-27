@@ -10,7 +10,7 @@ foreach ($timezones as $tz) {
 }
 $sampleAt = (new DateTimeImmutable('@' . $sample))->setTimezone(new DateTimeZone($prefs->timezone ?: 'UTC'));
 ?>
-<div class="page-head"><h1><?= $t('Profile') ?></h1><span class="muted"><?= $e($user) ?> · <?= $role === 'admin' ? $t('admin') : $t('editor') ?></span></div>
+<div class="page-head"><h1><?= $t('Profile') ?></h1><span class="muted"><?= $e($user) ?> · <?= $e($roleName($role)) ?></span></div>
 
 <section class="widget settings-section">
   <h2><?= $t('Preferences') ?></h2>

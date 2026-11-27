@@ -9,9 +9,11 @@
     <ul class="glance">
       <li><a href="<?= $self ?>?r=pages"><?= $t('<strong>{n}</strong> page|<strong>{n}</strong> pages', ['n' => $pageCount]) ?></a>
         <small class="muted"><?= $t('in {languages}', ['languages' => implode(', ', array_map('strtoupper', $site->languages()))]) ?></small></li>
+      <?php if ($canPublish): ?>
       <li><a href="<?= $self ?>?r=submissions"><?= $t('<strong>{n}</strong> form submission|<strong>{n}</strong> form submissions', ['n' => $submissions]) ?></a>
         <small class="muted"><?= $t('{n} in the last 7 days', ['n' => $recentCount]) ?></small></li>
       <li><a href="<?= $self ?>?r=subscribers"><?= $t('<strong>{n}</strong> newsletter subscriber|<strong>{n}</strong> newsletter subscribers', ['n' => $subscribers]) ?></a></li>
+      <?php endif ?>
     </ul>
     <p class="muted"><?= $live ? $t('Live build published {!time}.', ['time' => $time($live['at'])]) : $t('The live site has not been published from the admin yet.') ?></p>
   </section>
@@ -27,11 +29,12 @@
         <span><?= $unpublished && !$stagingOpen ? $t('Site changes (such as redirects) are not live yet') : $t('Up to date') ?></span></li>
     </ol>
     <p class="widget-actions">
-      <a class="btn<?= $drafted || $stagingOpen || $unpublished ? ' btn-primary' : '' ?>" href="<?= $self ?>?r=review"><?= $t('Review and publish') ?></a>
+      <a class="btn<?= $drafted || $stagingOpen || $unpublished ? ' btn-primary' : '' ?>" href="<?= $self ?>?r=review"><?= $canPublish ? $t('Review and publish') : $t('Review and submit') ?></a>
       <a class="btn" href="<?= $self ?>?r=edit"><?= $t('Edit the home page') ?></a>
     </p>
   </section>
 
+  <?php if ($canPublish): ?>
   <section class="widget">
     <h2><?= $t('Latest submissions') ?></h2>
     <?php if (!$latest): ?>
@@ -47,6 +50,7 @@
       <p><a href="<?= $self ?>?r=submissions"><?= $t('All submissions') ?></a></p>
     <?php endif ?>
   </section>
+  <?php endif ?>
 
   <section class="widget">
     <h2><?= $t('Recently published') ?></h2>

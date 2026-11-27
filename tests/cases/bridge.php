@@ -166,6 +166,11 @@ test('bridge: MCP initialize, tools/list, batches, notifications and errors', fu
 
 function editor_admin(App $app, Database $db, string $user = 'bence', string $role = 'admin'): Lou\Admin\AdminApp
 {
+    // sessions are only valid for users that exist (the role is re-read from users.json on every request)
+    $users = new Lou\Admin\Users($app->varDir . '/users.json');
+    if ($users->role($user) !== $role) {
+        $users->add($user, 'test-password-123', $role);
+    }
     return new Lou\Admin\AdminApp($app, $db, new Lou\Admin\ArraySession(['user' => $user, 'role' => $role, 'started' => time(), 'seen' => time(), 'csrf' => 'tok']));
 }
 

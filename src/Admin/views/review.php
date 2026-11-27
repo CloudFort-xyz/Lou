@@ -41,7 +41,7 @@ $field = static function (array $f) use ($e, $t): void { ?>
  * Each change says what changed in a line; the details unfold under it (the rest of the fields, or the line diff of a template).
  */
 $views ??= [];
-$changes = static function (array $list, string $where, array $diffs) use ($e, $t, $self, $csrf, $by, $views, $field, $diffPre): void { ?>
+$changes = static function (array $list, string $where, array $diffs) use ($e, $t, $self, $csrf, $by, $views, $field, $diffPre, $canPublish): void { ?>
   <?php foreach (ChangeList::grouped($list) as $group => $groupItems): ?>
     <h4 class="change-group"><?= $t(ChangeList::GROUPS[$group]) ?></h4>
     <ul class="changes">
@@ -58,12 +58,14 @@ $changes = static function (array $list, string $where, array $diffs) use ($e, $
             <?php if ($it['page'] && $it['kind'] !== 'deleted'): ?>
               <a href="<?= $self ?>?r=edit&amp;page=<?= $e(rawurlencode($it['page']['id'])) ?>&amp;lang=<?= $e($it['page']['lang']) ?>" title="<?= $t('Open this page in the editor. Your edit goes into your draft, on top of this change.') ?>"><?= $t('Edit') ?></a>
             <?php endif ?>
+            <?php if ($where === 'draft' || $canPublish): ?>
             <form method="post" action="<?= $self ?>?r=<?= $where === 'draft' ? 'revert' : 'staging-revert' ?>" class="inline"
                   data-confirm="<?= $where === 'draft' ? $t('Undo your change to {label}?', ['label' => $it['label']]) : $t('Take the change to {label} off staging? It goes back to the live version.', ['label' => $it['label']]) ?>">
               <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
               <input type="hidden" name="files[]" value="<?= $e($it['path']) ?>">
               <button class="link" type="submit"><?= $t('Undo') ?></button>
             </form>
+            <?php endif ?>
           </span>
         </div>
         <?php if ($it['fields']): ?>
@@ -133,7 +135,7 @@ $diffList = static function (array $list, array $diffs) use ($e, $t, $diffPre): 
 <?php if (!$mine && !$open): ?>
   <section class="card wide review-empty">
     <p><strong><?= $t('Nothing to review.') ?></strong> <?= $t('Edit a page under {!pages}: your changes are saved to your own draft and show up here, ready to submit.', ['pages' => '<a href="' . $self . '?r=pages">' . $t('Pages') . '</a>']) ?></p>
-    <?php if ($unpublished): ?>
+    <?php if ($unpublished && $canPublish): ?>
       <form method="post" action="<?= $self ?>?r=publish" class="inline">
         <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
         <button class="btn" type="submit"><?= $t('Rebuild the live site') ?></button> <span class="muted"><?= $t('Redirects or other site changes are not live yet.') ?></span>
@@ -225,6 +227,11 @@ $diffList = static function (array $list, array $diffs) use ($e, $t, $diffPre): 
     <div class="fold-head"><h3><?= $t('What changes') ?></h3><?php $expandAll($items, $diffs, '#staging-changes') ?></div>
     <div id="staging-changes"><?php $changes($items, 'staging', $diffs) ?></div>
 
+    <?php if (!$canPublish): ?>
+    <div class="decision">
+      <span class="muted"><?= $t('An editor or administrator checks these changes and publishes them. Until then, nothing changes on the live site.') ?></span>
+    </div>
+    <?php else: ?>
     <div class="decision">
       <form method="post" action="<?= $self ?>?r=publish" class="inline" data-confirm="<?= $t('Publish {changes} to the live site?', ['changes' => $changesN($nStaged)]) ?>">
         <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
@@ -238,6 +245,7 @@ $diffList = static function (array $list, array $diffs) use ($e, $t, $diffPre): 
       </form>
       <span class="muted"><?= $t('A backup is made before publishing, and the old versions stay in the {!history}.', ['history' => '<a href="' . $self . '?r=history">' . $t('history') . '</a>']) ?></span>
     </div>
+    <?php endif ?>
 
     <details class="tech">
       <summary><?= $t('Technical details') ?></summary>

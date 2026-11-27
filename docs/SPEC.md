@@ -405,10 +405,43 @@ expiry).
 ## 8. Admin and inline editor
 
 - At `/_lou/admin.php`: log in with a user name and password. Users are
-  managed with `php lou user add|remove|list` and stored as password hashes
-  in `var/users.json`. Roles: **editor** (edit content, submit, publish,
-  history, see submissions) and **admin** (also assistants/tokens,
-  redirects, builds/rollback, backups, deleting submissions). Sessions are hardened: their own save path in
+  stored as password hashes in `var/users.json` (0600) and managed on the
+  **Users** page (admins) or with `php lou user list|add|invite|signout|remove`.
+  Roles, each including the one before: **contributor** (edit content in
+  their own draft, submit it, history; can't publish, reject or take changes
+  off staging, and can't see form submissions or subscribers, which hold
+  personal data), **editor** (also publishes and sees submissions) and
+  **admin** (also users, assistants/tokens, settings, updates, redirects,
+  builds/rollback, backups, deleting submissions). Assistant tokens are not
+  users: they work in their own draft like a contributor and never publish;
+  each token records which admin created it.
+- **Users page.** A list (name, email, role, last login, invited) and an
+  invite form; each user has an edit page (role, email, send a new invite or
+  a password reset link, sign out everywhere, remove, and their recent audit
+  log entries behind an accordion). Best practices built in:
+  - *Invites, not admin-set passwords:* inviting creates the user with no
+    password and emails a one-time link (48 h) where they choose one and are
+    signed in. If email isn't set up the admin gets the link, shown once, to
+    pass on. Admin password resets work the same way. Links carry a random
+    256-bit token; only its SHA-256 is stored, one link per user.
+  - *Forgot password* on the login page: by user name or email, a one-hour
+    link, the same answer whether or not the account exists, at most 5
+    requests per IP and 3 emails per account an hour.
+  - *Passwords:* `password_hash` (rehashed at login when PHP's default
+    changes), at least 10 characters, no composition rules or expiry (NIST
+    SP 800-63B), but common passwords, single repeated characters and the user
+    name plus a few characters are refused (`PasswordPolicy`).
+  - *Changes apply at once:* the role is read from `users.json` on every
+    request. Each user has a session version (`sv`); a password change, a
+    reset link being used or "Sign out everywhere" bumps it, and every session
+    started before ends on its next request (the current one carries on after
+    your own password change). Removed users are signed out the same way.
+  - *Last-admin protection:* the last administrator can't be demoted or
+    removed; nobody removes themselves or changes their own role.
+  - *Rate limits:* 10 failed logins an hour per IP and 20 per account (any
+    IP), never a permanent lock.
+  - Every user change, login, invite and reset is in the audit log.
+- Sessions are hardened: their own save path in
   `var/sessions`, strict mode, a `__Host-` cookie with Secure, HttpOnly and
   SameSite=Lax (Strict would sign people out when they open an admin link
   from another site), a 2 h idle and 12 h absolute timeout, CSRF tokens on every

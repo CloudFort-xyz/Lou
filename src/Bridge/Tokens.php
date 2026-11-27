@@ -14,14 +14,14 @@ final class Tokens
     {
     }
 
-    /** @return array<string, array{name: string, hash: string, created: string, last_used: ?string}> */
+    /** @return array<string, array{name: string, hash: string, created: string, last_used: ?string, by?: string}> */
     public function all(): array
     {
         return is_file($this->file) ? Fs::readJson($this->file) : [];
     }
 
     /** @return string the token, shown once */
-    public function create(string $name): string
+    public function create(string $name, ?string $by = null): string
     {
         $name = trim(strip_tags($name));
         if ($name === '' || mb_strlen($name) > 60) {
@@ -29,7 +29,7 @@ final class Tokens
         }
         $token = 'lou_' . bin2hex(random_bytes(24));
         $all = $this->all();
-        $all[substr(hash('sha256', $token), 0, 12)] = ['name' => $name, 'hash' => hash('sha256', $token), 'created' => gmdate('c'), 'last_used' => null];
+        $all[substr(hash('sha256', $token), 0, 12)] = ['name' => $name, 'hash' => hash('sha256', $token), 'created' => gmdate('c'), 'last_used' => null] + ($by !== null ? ['by' => $by] : []);
         $this->save($all);
         return $token;
     }
