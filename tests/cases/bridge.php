@@ -281,7 +281,7 @@ test('bridge: assistants screen creates a token once and revokes it; live build 
     check(!str_contains($page, $m[0]), 'token not shown again');
     contains($page, 'claude mcp add');
     contains($page, 'lou_YOUR_TOKEN');
-    check(substr_count($page, 'data-copy="snip-') === 9, 'every snippet has a copy button');
+    check(substr_count($page, 'data-copy="snip-') === 13, 'every snippet has a copy button');
     contains($page, 'Copilot Studio');
     contains($page, 'parameter name <code>key</code>', 'Copilot Studio sends the token as ?key=');
     contains($page, '${input:lou-token}', 'the VS Code config prompts for the token instead of storing it');

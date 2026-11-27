@@ -13,6 +13,12 @@ ErrorDocument 404 /404.html
     Require all denied
 </FilesMatch>
 
+# --- OAuth discovery for AI assistants (served by oauth.php in the endpoint folder)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^\.well-known/(oauth-authorization-server|oauth-protected-resource|openid-configuration)(/.*)?$ __ENDPOINT_DIR__/oauth.php?well-known=$1 [L,QSA]
+</IfModule>
+
 # --- Security headers -------------------------------------------------------
 <IfModule mod_headers.c>
     Header always set X-Content-Type-Options "nosniff"

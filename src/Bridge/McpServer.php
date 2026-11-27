@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lou\Bridge;
 
+use Lou\Admin\Users;
 use Lou\App;
 use Lou\Db\Database;
 use Lou\Http\Request;
@@ -18,8 +19,9 @@ use Lou\LouException;
  *   POST mcp.php?tool=read_site_file  {"path": "..."} → {"ok": true, "result": ...}
  *   GET  mcp.php?openapi               OpenAPI 3.1 description of the REST fallback
  *
- * Every request except ?openapi needs "Authorization: Bearer lou_…" (or ?key=lou_… for clients that
- * cannot send headers). Tokens are created in the admin (Assistants) or with `php lou token add`.
+ * Every request except ?openapi needs "Authorization: Bearer …": an OAuth access token (louat_…, from signing
+ * in, see OAuth) or a bridge token (lou_…, also as ?key=lou_… for clients that cannot send headers). Bridge
+ * tokens are created in the admin (Users → AI assistants) or with `php lou token add`.
  */
 final class McpServer
 {
@@ -55,11 +57,20 @@ final class McpServer
             return Response::json(429, ['error' => 'Too many failed attempts, try again later']);
         }
         $token = $this->bearer($req);
-        $caller = $token === '' ? null : (new Tokens($this->app->varDir . '/tokens.json'))->verify($token);
+        $caller = match (true) {
+            $token === '' => null,
+            str_starts_with($token, 'louat_') => (new OAuth($this->db, new Users($this->app->varDir . '/users.json'), $this->now))->verify($token),
+            default => (new Tokens($this->app->varDir . '/tokens.json'))->verify($token),
+        };
         if ($caller === null) {
-            $this->hit($ipKey);
-            return new Response(401, (string) json_encode(['error' => 'A valid bridge token is required']), [
-                'Content-Type' => 'application/json', 'WWW-Authenticate' => 'Bearer realm="api"']);
+            if ($token !== '') {
+                $this->hit($ipKey);   // no token at all is how sign-in starts, not a guess
+            }
+            // RFC 9728: tells MCP clients where to sign in (OAuth). Token clients just see a 401.
+            $meta = OAuthServer::urls($this->app, $req)['resource_metadata'];
+            return new Response(401, (string) json_encode(['error' => $token === '' ? 'Sign in or send a bridge token' : 'The token is not valid (revoked or expired)']), [
+                'Content-Type' => 'application/json',
+                'WWW-Authenticate' => 'Bearer realm="api", resource_metadata="' . $meta . '"' . ($token === '' ? '' : ', error="invalid_token"')]);
         }
         $caller = 'llm:' . $caller;
 

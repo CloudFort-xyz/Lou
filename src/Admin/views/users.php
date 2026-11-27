@@ -27,7 +27,7 @@
   </tbody>
 </table>
 
-<p class="muted"><?= $t('{n} AI assistant also has access, with a token.|{n} AI assistants also have access, with tokens.', ['n' => $assistantCount]) ?> <a href="<?= $self ?>?r=assistants"><?= $t('Manage assistants') ?></a></p>
+<p class="muted"><?= $t('{n} AI assistant also has access.|{n} AI assistants also have access.', ['n' => $assistantCount]) ?> <a href="<?= $self ?>?r=assistants"><?= $t('Manage assistants') ?></a></p>
 
 <section class="widget settings-section">
   <h2><?= $t('Invite someone') ?></h2>

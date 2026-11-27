@@ -10,6 +10,9 @@ use Lou\Integrations;
 use Lou\Mail\MailSettings;
 use Lou\Mail\Message;
 use Lou\Backup\Backup;
+use Lou\Bridge\OAuth;
+use Lou\Bridge\OAuthError;
+use Lou\Bridge\OAuthServer;
 use Lou\Bridge\Tokens;
 use Lou\Build\Builder;
 use Lou\Build\Output;
@@ -113,6 +116,13 @@ final class AdminApp
         'GET assistants'      => 'admin',
         'POST token-add'      => 'admin',
         'POST token-revoke'   => 'admin',
+        // OAuth consent (Lou\Bridge\OAuth): signed-in people only; who may approve is checked inside (editor+)
+        'GET authorize'       => 'contributor',
+        'POST authorize'      => 'contributor',
+        'POST oauth-revoke'   => 'admin',
+        'POST oauth-client-add' => 'admin',
+        'POST oauth-client-redirect' => 'admin',
+        'POST oauth-client-delete' => 'admin',
         'GET settings'        => 'admin',
         'POST settings'       => 'admin',
         'POST mail-settings'  => 'admin',
@@ -171,6 +181,10 @@ final class AdminApp
 
         if ($need !== null) {
             if (!$this->user()) {
+                if ($key === 'GET authorize') {
+                    // an assistant sent the person here to sign in: come back to the consent screen after login
+                    $this->session->set('after_login', ['query' => array_diff_key($req->query, ['r' => 1]), 'at' => $this->time()]);
+                }
                 return $req->wantsJson() ? Response::json(401, ['ok' => false, 'message' => $this->tr('Please log in again')])
                     : Response::redirect($this->self() . '?r=login');
             }
@@ -244,6 +258,14 @@ final class AdminApp
         }
         $users->touchLogin($name, $t);
         $this->db->audit('admin', 'login', null, $name);
+        $after = $this->session->get('after_login');
+        $this->session->set('after_login', null);
+        if (is_array($after) && $t - (int) $after['at'] < 1800 && !$this->mustSetUpTotp()) {
+            if ($flash !== null) {
+                $this->session->set('flash', $flash);
+            }
+            return Response::redirect($this->self() . '?' . http_build_query(['r' => 'authorize'] + (array) $after['query'], '', '&', PHP_QUERY_RFC3986));
+        }
         if ($flash !== null) {
             return $this->done('dashboard', $flash);
         }
@@ -1659,7 +1681,7 @@ final class AdminApp
             'roles'   => Users::ROLES,
             'now'     => $this->time(),
             'require2fa' => !empty($this->app->settings()['require_2fa']),
-            'assistantCount' => count($this->tokens()->all()),
+            'assistantCount' => count($this->tokens()->all()) + count($this->oauth()->grants()),
         ]);
     }
 
@@ -1810,7 +1832,122 @@ final class AdminApp
         if ($new !== null) {
             $this->session->set('new_token', null);
         }
-        return $this->page($this->tr('Assistants'), 'assistants', ['tokens' => $this->tokens()->all(), 'newToken' => is_string($new) ? $new : null]);
+        $client = $this->session->get('new_client');
+        $this->session->set('new_client', null);
+        return $this->page($this->tr('Assistants'), 'assistants', [
+            'tokens' => $this->tokens()->all(), 'newToken' => is_string($new) ? $new : null,
+            'grants' => $this->oauth()->grants(), 'clients' => $this->oauth()->manualClients(),
+            'newClient' => is_array($client) ? $client : null, 'oauthUrls' => OAuthServer::urls($this->app, $this->req),
+        ]);
+    }
+
+    // ---------------------------------------------------------------- OAuth (assistants that sign in)
+
+    private function oauth(): OAuth
+    {
+        return new OAuth($this->db, $this->users(), $this->now);
+    }
+
+    /** The consent screen an assistant sends the person to (oauth.php?authorize forwards here). */
+    private function rGetAuthorize(): Response
+    {
+        return $this->consent(array_diff_key($this->req->query, ['r' => 1]));
+    }
+
+    private function rPostAuthorize(): Response
+    {
+        $fields = ['client_id', 'redirect_uri', 'state', 'response_type', 'code_challenge', 'code_challenge_method', 'resource'];
+        $q = array_intersect_key($this->req->post, array_flip($fields));
+        $urls = OAuthServer::urls($this->app, $this->req);
+        try {
+            $request = $this->oauth()->checkRequest($q, $urls['mcp']);
+        } catch (OAuthError $e) {
+            return $this->consentError($e, $urls['issuer']);
+        }
+        $client = $request['client'];
+        if ($this->req->input('decision') !== 'approve') {
+            return $this->backToApp($client, OAuth::redirectUrl($request['redirect_uri'], ['error' => 'access_denied', 'state' => $request['state']], $urls['issuer']), false);
+        }
+        $code = $this->oauth()->approve($request, (string) $this->user());
+        $this->db->audit('admin', 'oauth-approve', (string) $client['name'], $this->user());
+        return $this->backToApp($client, OAuth::redirectUrl($request['redirect_uri'], ['code' => $code, 'state' => $request['state']], $urls['issuer']), true);
+    }
+
+    private function consent(array $q): Response
+    {
+        $urls = OAuthServer::urls($this->app, $this->req);
+        try {
+            $request = $this->oauth()->checkRequest($q, $urls['mcp']);
+        } catch (OAuthError $e) {
+            return $this->consentError($e, $urls['issuer']);
+        }
+        if (!Users::atLeast($this->role(), OAuth::APPROVER_ROLE)) {
+            return $this->page($this->tr('Connect an assistant'), 'message', ['message' => $this->tr('Only editors and administrators can connect an assistant. Ask an administrator to connect it for you.'), 'error' => true], 403);
+        }
+        return $this->page($this->tr('Connect an assistant'), 'authorize', ['request' => $request, 'query' => $q]);
+    }
+
+    /** Errors the app should hear about go back to it; the others (unknown app, foreign address) are shown here. */
+    private function consentError(OAuthError $e, string $issuer): Response
+    {
+        if ($e->redirect !== null) {
+            return Response::redirect(OAuth::redirectUrl($e->redirect, ['error' => $e->error, 'error_description' => $e->getMessage(), 'state' => $e->state], $issuer));
+        }
+        return $this->page($this->tr('Connect an assistant'), 'message', ['message' => $this->tr('The assistant could not be connected: {why}', ['why' => $e->getMessage()]), 'error' => true], 400);
+    }
+
+    /**
+     * A page that sends the browser on to the app. Not a redirect: browsers apply the admin's form-action 'self'
+     * policy to redirects that follow a form post, which would block the way back to the app's address.
+     */
+    private function backToApp(array $client, string $url, bool $approved): Response
+    {
+        $r = $this->page($this->tr('Connect an assistant'), 'authorize-done', ['client' => $client, 'url' => $url, 'approved' => $approved,
+            'host' => (string) (parse_url($url, PHP_URL_HOST) ?: parse_url($url, PHP_URL_SCHEME))]);
+        return new Response($r->status, $r->body, $r->headers + ['Refresh' => '0; url=' . $url]);
+    }
+
+    private function rPostOauthRevoke(): Response
+    {
+        $this->oauth()->revokeGrant($this->req->input('id'));
+        $this->db->audit('admin', 'oauth-revoke', $this->req->input('id'), $this->user());
+        return $this->done('assistants', $this->tr('The connection was ended. The assistant has lost access, and has to sign in again to come back.'));
+    }
+
+    private function rPostOauthClientAdd(): Response
+    {
+        $redirect = $this->checkedRedirect();
+        if (OAuth::cleanName($this->req->input('name')) === '') {
+            throw new LouException($this->tr('Give the app a name, e.g. Copilot Studio – Kner agent'));
+        }
+        ['client' => $c, 'secret' => $secret] = $this->oauth()->register(['client_name' => $this->req->input('name'),
+            'redirect_uris' => $redirect === '' ? [] : [$redirect]], false, $this->user());
+        $this->db->audit('admin', 'oauth-client-add', (string) $c['name'], $this->user());
+        $this->session->set('new_client', ['id' => $c['id'], 'secret' => $secret, 'name' => $c['name']]);
+        return Response::redirect($this->self() . '?r=assistants#app-credentials');
+    }
+
+    private function rPostOauthClientRedirect(): Response
+    {
+        $this->oauth()->setRedirect($this->req->input('id'), $this->checkedRedirect());
+        $this->db->audit('admin', 'oauth-client-redirect', $this->req->input('id'), $this->user());
+        return $this->done('assistants', $this->tr('Saved the return address.'));
+    }
+
+    private function checkedRedirect(): string
+    {
+        $uri = trim($this->req->input('redirect_uri'));
+        if ($uri !== '' && !OAuth::validRedirect($uri)) {
+            throw new LouException($this->tr('That is not a usable return address. Paste the redirect URL the app shows (it starts with https://).'));
+        }
+        return $uri;
+    }
+
+    private function rPostOauthClientDelete(): Response
+    {
+        $this->oauth()->deleteClient($this->req->input('id'));
+        $this->db->audit('admin', 'oauth-client-delete', $this->req->input('id'), $this->user());
+        return $this->done('assistants', $this->tr('The app credentials were deleted. Assistants connected with them have lost access.'));
     }
 
     private function rPostTokenAdd(): Response
